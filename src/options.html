@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ActiveReader Settings</title>
+    <link rel="stylesheet" href="options.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="wrap topbar-inner">
+        <div class="brand">
+          <span class="logo">AR</span>
+          <div>
+            <div class="title">ActiveReader</div>
+            <div class="sub">Settings &amp; vocabulary</div>
+          </div>
+        </div>
+        <div class="topbar-actions">
+          <span id="save-status" class="save-status" role="status"></span>
+          <button id="reset-all" class="btn ghost">Reset defaults</button>
+        </div>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <p class="lead">
+        Highlight text on any page, then use the floating toolbar or right-click menu to hear it,
+        translate it or quiz yourself on it.
+      </p>
+
+      <!-- Gemini -->
+      <section class="card">
+        <h2>Gemini AI</h2>
+        <p class="desc">
+          Quiz generation and (optionally) translation use the Google Gemini API. Audio and Google
+          Translate work without a key. Get a free key from
+          <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Google AI Studio</a>.
+          Your key is stored in Chrome sync storage and is only ever sent to Google.
+        </p>
+
+        <label class="field">
+          <span>API key</span>
+          <span class="input-row">
+            <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…" />
+            <button id="toggle-key" class="btn ghost" type="button">Show</button>
+          </span>
+        </label>
+
+        <label class="field">
+          <span>Model</span>
+          <span class="input-row">
+            <input id="gemini-model" list="model-list" spellcheck="false" autocomplete="off"
+                   placeholder="Type any model ID, e.g. gemini-2.5-flash" />
+            <button id="fetch-models" class="btn" type="button">Fetch models</button>
+          </span>
+          <datalist id="model-list"></datalist>
+        </label>
+        <div id="model-suggestions" class="chips"></div>
+        <p class="desc">
+          The model ID is free text, so new Gemini models work the moment Google releases them —
+          no extension update needed. Leave it blank and ActiveReader will pick one from the live
+          list, or use <b>Fetch models</b> to choose yourself.
+        </p>
+
+        <div class="row">
+          <button id="test-gemini" class="btn" type="button">Test connection</button>
+          <span id="test-result" class="test-result"></span>
+        </div>
+      </section>
+
+      <!-- Languages -->
+      <section class="card">
+        <h2>Languages</h2>
+        <div class="grid2">
+          <label class="field">
+            <span>Language I am learning</span>
+            <select id="target-lang"></select>
+          </label>
+          <label class="field">
+            <span>Explain &amp; translate into</span>
+            <select id="base-lang"></select>
+          </label>
+        </div>
+      </section>
+
+      <!-- Translation -->
+      <section class="card">
+        <h2>Translation</h2>
+        <label class="field">
+          <span>Translation engine</span>
+          <select id="translation-engine">
+            <option value="google">Google Translate (fast, no key)</option>
+            <option value="gemini">Gemini (uses your API key)</option>
+          </select>
+        </label>
+        <p class="desc">
+          If the chosen engine fails, ActiveReader automatically tries the other one.
+        </p>
+      </section>
+
+      <!-- TTS -->
+      <section class="card">
+        <h2>Text to speech</h2>
+        <label class="field">
+          <span>Voice provider</span>
+          <select id="tts-provider">
+            <option value="google">Google Translate voice (natural, no key)</option>
+            <option value="browser">Browser voice (offline, adjustable)</option>
+          </select>
+        </label>
+
+        <div class="grid2">
+          <label class="field">
+            <span>Speed (browser voice): <b id="tts-rate-val">1.00</b>×</span>
+            <input id="tts-rate" type="range" min="0.5" max="2" step="0.05" />
+          </label>
+          <label class="field">
+            <span>Pitch (browser voice): <b id="tts-pitch-val">1.00</b></span>
+            <input id="tts-pitch" type="range" min="0" max="2" step="0.05" />
+          </label>
+        </div>
+
+        <label class="field">
+          <span>Preview text</span>
+          <span class="input-row">
+            <input id="preview-text" type="text" value="Hello! This is ActiveReader." />
+            <button id="preview" class="btn" type="button">Preview</button>
+          </span>
+        </label>
+      </section>
+
+      <!-- Reading -->
+      <section class="card">
+        <h2>Reading &amp; selection</h2>
+        <label class="switch">
+          <input id="show-toolbar" type="checkbox" />
+          <span>Show floating buttons when text is highlighted</span>
+        </label>
+        <label class="switch">
+          <input id="auto-translate" type="checkbox" />
+          <span>Translate automatically when the panel opens</span>
+        </label>
+        <label class="switch">
+          <input id="auto-save" type="checkbox" />
+          <span>Auto-save looked up phrases to vocabulary</span>
+        </label>
+
+        <div class="grid2">
+          <label class="field">
+            <span>Minimum characters to react to</span>
+            <input id="min-len" type="number" min="1" max="100" />
+          </label>
+          <label class="field">
+            <span>Maximum characters to send</span>
+            <input id="max-len" type="number" min="200" max="20000" step="100" />
+          </label>
+        </div>
+
+        <label class="field">
+          <span>Disabled sites (one hostname per line)</span>
+          <textarea id="disabled-sites" rows="3" spellcheck="false" placeholder="example.com&#10;news.site.org"></textarea>
+        </label>
+      </section>
+
+      <!-- Quiz -->
+      <section class="card">
+        <h2>Quiz defaults</h2>
+        <div class="field">
+          <span>Question types</span>
+          <div class="checks">
+            <label class="check"><input type="checkbox" name="quizTypes" value="mcq" /> Multiple choice</label>
+            <label class="check"><input type="checkbox" name="quizTypes" value="short" /> Short answer</label>
+            <label class="check"><input type="checkbox" name="quizTypes" value="blank" /> Fill in the blank</label>
+          </div>
+        </div>
+
+        <div class="grid3">
+          <label class="field">
+            <span>Difficulty</span>
+            <select id="quiz-difficulty">
+              <option value="beginner">Beginner</option>
+              <option value="intermediate">Intermediate</option>
+              <option value="advanced">Advanced</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Questions per quiz</span>
+            <input id="quiz-count" type="number" min="1" max="10" />
+          </label>
+          <label class="field">
+            <span>Question language</span>
+            <select id="quiz-language">
+              <option value="target">Target language</option>
+              <option value="base">My language</option>
+              <option value="both">Both</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="switch">
+          <input id="quiz-explain" type="checkbox" />
+          <span>Include a short explanation for each answer</span>
+        </label>
+      </section>
+
+      <!-- Appearance -->
+      <section class="card">
+        <h2>Appearance</h2>
+        <div class="grid2">
+          <label class="field">
+            <span>Panel theme</span>
+            <select id="theme">
+              <option value="auto">Match system</option>
+              <option value="light">Light</option>
+              <option value="dark">Dark</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Accent colour</span>
+            <select id="accent">
+              <option value="indigo">Indigo</option>
+              <option value="emerald">Emerald</option>
+              <option value="rose">Rose</option>
+              <option value="amber">Amber</option>
+              <option value="violet">Violet</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <!-- Vocabulary -->
+      <section class="card">
+        <h2>Saved vocabulary</h2>
+        <div class="row space">
+          <input id="vocab-search" type="search" placeholder="Search saved words…" />
+          <div class="row">
+            <button id="export-json" class="btn" type="button">Export JSON</button>
+            <button id="export-csv" class="btn" type="button">Export CSV</button>
+            <button id="clear-vocab" class="btn danger" type="button">Clear all</button>
+          </div>
+        </div>
+        <div id="vocab-count" class="desc"></div>
+        <ul id="vocab-list" class="vocab"></ul>
+        <p id="vocab-empty" class="empty">Nothing saved yet.</p>
+      </section>
+    </main>
+
+    <script src="lib/config.js"></script>
+    <script src="options.js"></script>
+  </body>
+</html>

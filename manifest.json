@@ -1,0 +1,57 @@
+{
+  "manifest_version": 3,
+  "name": "ActiveReader — Language Learning Reader",
+  "version": "1.0.0",
+  "description": "Highlight text on any page to hear it spoken, read a translation, and quiz yourself with AI-generated questions.",
+  "minimum_chrome_version": "109",
+  "permissions": [
+    "storage",
+    "contextMenus",
+    "offscreen",
+    "tts",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://translate.google.com/*",
+    "https://translate.googleapis.com/*",
+    "https://generativelanguage.googleapis.com/*"
+  ],
+  "background": {
+    "service_worker": "src/background.js"
+  },
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_title": "ActiveReader",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "options_ui": {
+    "page": "src/options.html",
+    "open_in_tab": true
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["src/lib/config.js", "src/content.js"],
+      "run_at": "document_idle",
+      "all_frames": false
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["src/content.css"],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

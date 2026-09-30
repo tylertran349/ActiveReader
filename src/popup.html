@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ActiveReader</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <header class="head">
+      <div class="brand">
+        <span class="logo">AR</span>
+        <div>
+          <div class="title">ActiveReader</div>
+          <div class="sub">Language learning reader</div>
+        </div>
+      </div>
+      <button id="open-options" class="icon-btn" title="Open full settings" aria-label="Open settings"></button>
+    </header>
+
+    <div id="key-warning" class="warning" hidden>
+      <div class="warning-text">
+        <strong>No Gemini API key yet.</strong>
+        Translation and audio work without it, but quizzes need a key.
+      </div>
+      <button id="add-key" class="btn small primary">Add key</button>
+    </div>
+
+    <main>
+      <section class="card">
+        <div class="row">
+          <label class="field">
+            <span>Learning</span>
+            <select id="target-lang"></select>
+          </label>
+          <label class="field">
+            <span>Explain in</span>
+            <select id="base-lang"></select>
+          </label>
+        </div>
+
+        <label class="field full">
+          <span>Voice</span>
+          <select id="tts-provider">
+            <option value="google">Google Translate voice</option>
+            <option value="browser">Browser voice</option>
+          </select>
+        </label>
+
+        <label class="switch">
+          <input type="checkbox" id="show-toolbar" />
+          <span>Show floating buttons when I highlight text</span>
+        </label>
+
+        <label class="switch">
+          <input type="checkbox" id="auto-translate" />
+          <span>Translate automatically when I highlight text</span>
+        </label>
+      </section>
+
+      <section class="card">
+        <div class="card-head">
+          <h2>Saved words</h2>
+          <button id="open-vocab" class="link">Manage</button>
+        </div>
+        <ul id="vocab-list" class="vocab"></ul>
+        <p id="vocab-empty" class="empty">Nothing saved yet. Highlight text on a page and press Save.</p>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <span id="status" class="status" role="status"></span>
+      <span class="tip">Tip: right-click a selection for quick actions.</span>
+    </footer>
+
+    <script src="lib/config.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>
