@@ -138,6 +138,75 @@ body {
   flex: 1;
 }
 
+.banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 10px 12px 0;
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid rgba(99, 102, 241, 0.4);
+  color: var(--fg);
+}
+
+.banner.ok {
+  background: rgba(16, 185, 129, 0.12);
+  border-color: rgba(16, 185, 129, 0.4);
+}
+
+.banner-icon {
+  flex: none;
+  display: inline-flex;
+  font-size: 17px;
+  color: var(--accent);
+}
+
+.banner.ok .banner-icon {
+  color: var(--ok);
+}
+
+.banner-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 11.5px;
+  line-height: 1.4;
+}
+
+.banner-text strong {
+  font-size: 12.5px;
+}
+
+.banner-text span {
+  color: var(--muted);
+}
+
+.banner-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.banner-x {
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 2px 3px;
+  border-radius: 7px;
+  line-height: 1;
+  display: inline-flex;
+}
+
+.banner-x:hover {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.1);
+}
+
 main {
   padding: 12px;
   display: flex;

@@ -17,6 +17,7 @@ dependencies.
 | 🌐 **Translation** | Translates the highlighted text into your own language via Google Translate, with an optional Gemini engine, and reports the detected source language. Small speaker buttons play the original or the translation aloud. |
 | 🎓 **AI quizzes** | Gemini generates multiple-choice, short-answer and fill-in-the-blank questions from the selection. Answer them inline and get instant feedback: free-response answers are graded by Gemini (equivalent wording and small typos count) with a short explanation written in your own language. A **Translate question** button under each question shows it in your own language. Your last quiz stays put when you highlight new text or switch tabs, and if the model returns fewer questions than you asked for, ActiveReader automatically asks again to fill the quiz. |
 | ⭐ **Vocabulary** | Save words/phrases with their translation and source page. Search, export (JSON/CSV) and manage them in settings. |
+| ⬆️ **Update checks** | ActiveReader notices when its own version changes and, optionally, checks this GitHub project for a newer build every 12 hours. When one exists you get a toolbar badge, an optional notification, an in-popup banner and a one-click update page. |
 | ⚙️ **Persistent settings** | API key, languages, voice, quiz defaults, theme and more are stored in Chrome sync storage. |
 | 🛡️ **Backups that survive a clean** | Settings are also mirrored locally and restored automatically if they are wiped, and **Download backup file** in settings saves everything (plus vocabulary) so you can restore it after a system cleaner empties the browser profile. |
 | 🖱️ **Right-click menu** | Translate / listen / quiz / save straight from the context menu after selecting text. |
@@ -78,10 +79,50 @@ Open settings from the panel's ⚙ button, the popup, or `chrome://extensions`.
 - **Reading & selection** — floating toolbar on/off, auto-translate, auto-save lookups, minimum/maximum selection size, and a per-site block list.
 - **Quiz defaults** — which question types to generate, difficulty, number of questions, question language and whether to include explanations.
 - **Appearance** — light/dark/system theme and an accent colour.
+- **Updates** — current version, a **Check for updates** button, an automatic 12-hour check, an optional notification, and a page that walks through downloading the latest build.
 - **Backup & restore** — download a backup file (settings + vocabulary) and restore it later. Handy after a system cleaner empties the browser profile.
 - **Saved vocabulary** — search, delete, export and clear your saved words.
 
 Changes save automatically.
+
+---
+
+## Updating ActiveReader
+
+ActiveReader is installed as an **unpacked** extension, and Chrome does not update
+unpacked extensions on its own. To make that painless, the extension watches its
+own version and (optionally) this GitHub repository:
+
+- **After the extension itself changes version** — for example you replaced the
+  files and pressed **Reload** — the popup shows an *Updated to vX.Y.Z* banner and,
+  if notifications are on, a short "what's new" notification.
+- **When a newer version is published** to this repo's `main` branch, the toolbar
+  icon gets a red **NEW** badge, you can get a desktop notification, and the popup
+  banner plus the **Update ActiveReader** page link you straight to the download.
+- **Auto-check** runs on startup and every 12 hours while the setting is on. Turn it
+  off in **Settings → Updates** (or on the update page).
+
+### What one click can and cannot do
+
+Chrome extensions are sandboxed and cannot overwrite their own files, so a loaded
+unpacked extension **cannot install its own update**. Clicking **Download latest
+version** grabs the newest `.zip`, and the update page then tells you to unzip it
+and press **Reload** in `chrome://extensions`. Your settings, API key and
+vocabulary live in Chrome storage, not in the folder, so they survive the update.
+
+> **True automatic updates** are only possible when the extension is installed from
+> a `.crx` with an `update_url` (the Chrome Web Store, or a self-hosted update
+> manifest signed with the same key). If this project is ever published that way,
+> Chrome updates it silently and the built-in checker is simply a no-op. See
+> [Chrome's update documentation](https://developer.chrome.com/docs/extensions/how-to/distribute/host-on-linux)
+> to self-host a signed build.
+
+### Privacy of update checks
+
+The check fetches one file — `manifest.json` from this GitHub repository — and
+reads only its `version` field. It sends no identifiers and no personal data, and
+it never touches the pages you read. Turn it off with **Check for updates
+automatically**.
 
 ---
 
@@ -92,13 +133,14 @@ manifest.json            MV3 manifest
 icons/                   toolbar + store icons
 tests/config.test.js     unit tests for the shared config helpers
 src/
-  background.js          service worker: Gemini, translation, TTS, context menus
+  background.js          service worker: Gemini, translation, TTS, context menus, update checks
   content.js             selection toolbar + Translate/Audio/Quiz panel
   content.css            styles for the injected shadow-DOM UI
   offscreen.html/.js     plays Google Translate TTS audio in an extension context
   popup.html/.js/.css    toolbar popup (quick settings + recent vocabulary)
   options.html/.js/.css  full settings page
-  lib/config.js          shared defaults, language list, storage helpers
+  update.html/.js/.css   "update available" page + download/instructions
+  lib/config.js          shared defaults, languages, version helpers, storage helpers
 ```
 
 ### Running the tests
@@ -120,7 +162,9 @@ Translate MP3s and plays them, keeping playback reliable regardless of the page.
 
 ## Privacy
 
-- No analytics, no remote servers other than Google.
+- No analytics and no remote servers other than Google and (for update checks)
+  GitHub. The update check downloads one public file and reads only its version
+  number; see [Updating ActiveReader](#updating-activereader).
 - Selected text is sent to Google Translate for translation/audio and to the
   Gemini API for quizzes, and nowhere else.
 - The API key never touches the page — all requests are made from the extension's

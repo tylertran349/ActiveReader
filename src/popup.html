@@ -18,6 +18,18 @@
       <button id="open-options" class="icon-btn" title="Open full settings" aria-label="Open settings"></button>
     </header>
 
+    <div id="update-banner" class="banner" hidden>
+      <span id="update-banner-icon" class="banner-icon"></span>
+      <div class="banner-text">
+        <strong id="update-title"></strong>
+        <span id="update-sub"></span>
+      </div>
+      <div class="banner-actions">
+        <button id="update-action" class="btn small primary" type="button">Update</button>
+        <button id="update-dismiss" class="banner-x" type="button" title="Dismiss" aria-label="Dismiss"></button>
+      </div>
+    </div>
+
     <div id="key-warning" class="warning" hidden>
       <div class="warning-text">
         <strong>No Gemini API key yet.</strong>
@@ -70,7 +82,7 @@
 
     <footer class="foot">
       <span id="status" class="status" role="status"></span>
-      <span class="tip">Tip: right-click a selection for quick actions.</span>
+      <span class="tip">v<span id="app-version"></span> · Tip: right-click a selection for quick actions.</span>
     </footer>
 
     <script src="lib/config.js"></script>

@@ -233,6 +233,37 @@
         </div>
       </section>
 
+      <!-- Updates -->
+      <section class="card">
+        <h2>Updates</h2>
+        <p class="desc">
+          ActiveReader checks this GitHub project for a newer version. Chrome cannot install a newer
+          copy of an unpacked extension by itself, so when an update is found you get a one-click
+          download and instructions. Only the version number is read — no personal data is sent.
+        </p>
+
+        <div class="update-line">
+          <span id="update-badge" class="update-badge">Not checked yet</span>
+          <span id="update-detail" class="desc"></span>
+        </div>
+
+        <div class="row">
+          <button id="check-updates" class="btn" type="button">Check for updates</button>
+          <button id="open-update-page" class="btn" type="button">Update ActiveReader</button>
+          <a id="update-repo-link" class="btn" target="_blank" rel="noopener">GitHub repo</a>
+        </div>
+
+        <label class="switch">
+          <input id="auto-check-updates" type="checkbox" />
+          <span>Check for updates automatically (every 12 hours)</span>
+        </label>
+        <label class="switch">
+          <input id="notify-updates" type="checkbox" />
+          <span>Show a notification when an update is available</span>
+        </label>
+        <p id="update-status" class="desc"></p>
+      </section>
+
       <!-- Backup -->
       <section class="card">
         <h2>Backup &amp; restore</h2>

@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ActiveReader — Update</title>
+    <link rel="stylesheet" href="update.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="wrap inner">
+        <div class="brand">
+          <span class="logo">AR</span>
+          <div>
+            <div class="title">ActiveReader update</div>
+            <div class="sub">Get the latest version</div>
+          </div>
+        </div>
+        <button id="open-options" class="btn ghost" type="button">Settings</button>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <section class="card">
+        <div class="hero">
+          <span id="hero-icon" class="hero-icon"></span>
+          <div>
+            <h1 id="hero-title">Checking for updates…</h1>
+            <p id="hero-sub" class="desc"></p>
+          </div>
+        </div>
+
+        <div class="versions">
+          <div class="version-box">
+            <span class="label">Installed</span>
+            <span id="current-version" class="value">—</span>
+          </div>
+          <div class="version-box">
+            <span class="label">Latest on GitHub</span>
+            <span id="latest-version" class="value">—</span>
+          </div>
+        </div>
+
+        <div class="row">
+          <button id="check-now" class="btn" type="button">Check again</button>
+          <button id="get-latest" class="btn primary" type="button">Download latest version</button>
+          <button id="open-extensions" class="btn" type="button">Open chrome://extensions</button>
+        </div>
+
+        <p id="status-line" class="desc"></p>
+      </section>
+
+      <section class="card">
+        <h2>How to update</h2>
+        <p class="desc">
+          ActiveReader is installed as an unpacked folder, so Chrome cannot replace it
+          automatically. Updating takes about a minute:
+        </p>
+        <ol class="steps">
+          <li><b>Download</b> the latest <code>.zip</code> and unzip it.</li>
+          <li>Open <code>chrome://extensions</code> and turn on <b>Developer mode</b>.</li>
+          <li>Click <b>Reload</b> on ActiveReader if the files were replaced in place, or
+              <b>Load unpacked</b> to point at the new folder.</li>
+          <li>Your settings, API key and vocabulary are kept — they live in Chrome storage,
+              not in the folder.</li>
+        </ol>
+        <div class="row">
+          <a id="link-repo" class="btn" target="_blank" rel="noopener">Open GitHub repo</a>
+          <a id="link-releases" class="btn" target="_blank" rel="noopener">Releases</a>
+          <a id="link-commits" class="btn" target="_blank" rel="noopener">Recent changes</a>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Update settings</h2>
+        <label class="switch">
+          <input id="auto-check" type="checkbox" />
+          <span>Check for updates automatically (every 12 hours)</span>
+        </label>
+        <label class="switch">
+          <input id="notify-updates" type="checkbox" />
+          <span>Show a notification when an update is available</span>
+        </label>
+        <p class="desc">
+          ActiveReader reads only the <code>version</code> field from this project's
+          <code>manifest.json</code> on GitHub. No personal data is sent, and you can turn
+          checking off at any time.
+        </p>
+      </section>
+    </main>
+
+    <script src="lib/config.js"></script>
+    <script src="update.js"></script>
+  </body>
+</html>

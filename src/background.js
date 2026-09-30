@@ -14,7 +14,7 @@ let offscreenCloseTimer = null;
 
 /* ------------------------------------------------------------ lifecycle */
 
-chrome.runtime.onInstalled.addListener(async () => {
+chrome.runtime.onInstalled.addListener(async (details) => {
   // Menus must always be rebuilt, even if seeding settings fails.
   buildContextMenus();
   try {
@@ -24,15 +24,34 @@ chrome.runtime.onInstalled.addListener(async () => {
   } catch (e) {
     /* seeding is best effort */
   }
+
+  // A real version change means the extension itself was updated: remember it so
+  // the popup can show a "what's new" notice.
+  if (details && details.reason === "update" && details.previousVersion && details.previousVersion !== AR.VERSION) {
+    await recordUpdateNotice(details.previousVersion);
+  }
+
+  // Keep the periodic check running on the user's schedule and look right away.
+  await syncUpdateAlarm();
+  checkForUpdate({ reason: "auto" }).catch(() => {});
 });
 
-chrome.runtime.onStartup.addListener(buildContextMenus);
+chrome.runtime.onStartup.addListener(async () => {
+  buildContextMenus();
+  await syncUpdateAlarm();
+  checkForUpdate({ reason: "auto" }).catch(() => {});
+});
+
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm && alarm.name === AR.UPDATE.ALARM_NAME) checkForUpdate({ reason: "auto" }).catch(() => {});
+});
 
 /* Mirror settings into the local backup on every change, including ones that
  * arrive through Chrome Sync from another computer. This is what lets a wiped
- * sync area be rebuilt. */
+ * sync area be rebuilt. Also react to the update settings themselves. */
 chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "sync") return;
+  if (changes.autoCheckUpdates) syncUpdateAlarm();
   chrome.storage.sync
     .get(null)
     .then((all) => AR.writeLocalBackup(all))
@@ -162,6 +181,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       chrome.runtime.openOptionsPage();
       sendResponse({ ok: true });
       return undefined;
+    case MSG.CHECK_UPDATES:
+      checkForUpdate({ reason: msg.reason === "auto" ? "auto" : "manual" }).then(sendResponse);
+      return true;
+    case MSG.DISMISS_UPDATE:
+      dismissUpdate(msg.version).then(() => sendResponse({ ok: true }));
+      return true;
+    case MSG.OPEN_UPDATE_PAGE:
+      openUpdatePage();
+      sendResponse({ ok: true });
+      return undefined;
     default:
       return undefined;
   }
@@ -170,6 +199,237 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 function forwardTtsState(state) {
   if (lastTtsTabId == null) return;
   chrome.tabs.sendMessage(lastTtsTabId, { type: MSG.TTS_STATE, state }).catch(() => {});
+}
+
+/* -------------------------------------------------------------- updates */
+
+/* ActiveReader is loaded unpacked, so Chrome never updates it by itself. The
+ * background periodically reads the version in this GitHub repo's manifest.json
+ * and, when it is newer, flags the toolbar badge, notifies (optionally) and lets
+ * the UI point the user at the download. Only the version number is fetched. */
+
+const NOTIFY_UPDATE = "ar-update-available";
+const NOTIFY_UPDATED = "ar-updated";
+
+let updateCheckInFlight = null;
+
+/* Public entry point. Auto checks honour the setting; a manual check always
+ * runs. Concurrent requests share one network call. */
+async function checkForUpdate(opts) {
+  const reason = (opts && opts.reason) || "manual";
+
+  if (reason === "auto") {
+    const settings = await AR.getSettings();
+    if (!settings.autoCheckUpdates) return (await readUpdateStatus()) || emptyUpdateStatus();
+  }
+
+  if (updateCheckInFlight) return updateCheckInFlight;
+  updateCheckInFlight = runUpdateCheck(reason).finally(() => {
+    updateCheckInFlight = null;
+  });
+  return updateCheckInFlight;
+}
+
+async function runUpdateCheck(reason) {
+  const previous = await readUpdateStatus();
+  let status;
+
+  try {
+    // raw.githubusercontent.com sends `Access-Control-Allow-Origin: *`, so this
+    // works without a host permission. `no-store` avoids a stale cached copy.
+    const res = await fetch(AR.UPDATE.manifestUrl, { cache: "no-store", credentials: "omit" });
+    if (!res.ok) throw new Error("GitHub replied " + res.status + ".");
+    const data = await res.json();
+    const latest = String((data && data.version) || "").trim();
+    if (!AR.parseVersion(latest)) throw new Error("The latest manifest has no usable version.");
+
+    status = {
+      ok: true,
+      reason,
+      currentVersion: AR.VERSION,
+      latestVersion: latest,
+      updateAvailable: AR.isNewerVersion(latest, AR.VERSION),
+      checkedAt: Date.now()
+    };
+  } catch (e) {
+    status = {
+      ok: false,
+      reason,
+      currentVersion: AR.VERSION,
+      // Keep the last known version so a transient failure does not lose it.
+      latestVersion: (previous && previous.latestVersion) || "",
+      updateAvailable: !!(previous && previous.updateAvailable),
+      checkedAt: Date.now(),
+      error: e.message || "Could not check for updates."
+    };
+  }
+
+  await writeUpdateStatus(status);
+  await refreshUpdateBadge();
+  await maybeNotifyUpdate(status);
+  return status;
+}
+
+function emptyUpdateStatus() {
+  return { ok: false, currentVersion: AR.VERSION, latestVersion: "", updateAvailable: false, checkedAt: 0 };
+}
+
+async function readUpdateStatus() {
+  try {
+    const store = await chrome.storage.local.get(AR.UPDATE.STATUS_KEY);
+    return store[AR.UPDATE.STATUS_KEY] || null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function writeUpdateStatus(status) {
+  try {
+    await chrome.storage.local.set({ [AR.UPDATE.STATUS_KEY]: status });
+  } catch (e) {
+    /* best effort */
+  }
+}
+
+async function readLocal(key, fallback) {
+  try {
+    const store = await chrome.storage.local.get(key);
+    return key in store ? store[key] : fallback;
+  } catch (e) {
+    return fallback;
+  }
+}
+
+/* Keep the periodic alarm in sync with the autoCheckUpdates setting. */
+async function syncUpdateAlarm() {
+  try {
+    const settings = await AR.getSettings();
+    if (settings.autoCheckUpdates) {
+      await chrome.alarms.create(AR.UPDATE.ALARM_NAME, {
+        periodInMinutes: AR.UPDATE.CHECK_INTERVAL_MINUTES
+      });
+    } else {
+      await chrome.alarms.clear(AR.UPDATE.ALARM_NAME);
+    }
+  } catch (e) {
+    /* alarms are best effort */
+  }
+}
+
+/* Red "NEW" badge on the toolbar icon until the user dismisses the version. */
+async function refreshUpdateBadge() {
+  try {
+    const status = await readUpdateStatus();
+    const seen = await readLocal(AR.UPDATE.SEEN_KEY, "");
+    const show = AR.hasUpdate(status) && status.latestVersion !== seen;
+
+    await chrome.action.setBadgeBackgroundColor({ color: "#ef4444" });
+    await chrome.action.setBadgeText({ text: show ? "NEW" : "" });
+    await chrome.action.setTitle({
+      title: show ? "ActiveReader — update available (v" + status.latestVersion + ")" : "ActiveReader"
+    });
+  } catch (e) {
+    /* action API unavailable; badge is cosmetic */
+  }
+}
+
+/* One desktop notification per discovered version, at most. */
+async function maybeNotifyUpdate(status) {
+  if (!AR.hasUpdate(status)) return;
+
+  const settings = await AR.getSettings();
+  if (!settings.notifyUpdates) return;
+
+  const already = await readLocal(AR.UPDATE.NOTIFIED_KEY, "");
+  if (already === status.latestVersion) return;
+
+  const shown = await notify(
+    NOTIFY_UPDATE,
+    "ActiveReader update available",
+    "Version " + status.latestVersion + " is ready (you have " + AR.VERSION + "). Click to update."
+  );
+  if (shown) {
+    try {
+      await chrome.storage.local.set({ [AR.UPDATE.NOTIFIED_KEY]: status.latestVersion });
+    } catch (e) {
+      /* best effort */
+    }
+  }
+}
+
+/* Record that the extension itself just changed version, for the "what's new"
+ * banner. Resets dismissals and drops the previous check result, which pointed
+ * at an older target, so nothing claims an update is available until the fresh
+ * check finishes. */
+async function recordUpdateNotice(previousVersion) {
+  try {
+    await chrome.storage.local.set({
+      [AR.UPDATE.NOTICE_KEY]: { from: String(previousVersion || ""), to: AR.VERSION, at: Date.now() }
+    });
+    await chrome.storage.local.remove([AR.UPDATE.SEEN_KEY, AR.UPDATE.STATUS_KEY]);
+  } catch (e) {
+    /* best effort */
+  }
+
+  await refreshUpdateBadge();
+
+  const settings = await AR.getSettings();
+  if (settings.notifyUpdates) {
+    notify(
+      NOTIFY_UPDATED,
+      "ActiveReader updated",
+      "You are now on version " + AR.VERSION + ". Click to see what changed."
+    ).catch(() => {});
+  }
+}
+
+function notify(id, title, message) {
+  if (!chrome.notifications) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    try {
+      chrome.notifications.create(
+        id,
+        {
+          type: "basic",
+          iconUrl: "icons/icon128.png",
+          title: String(title),
+          message: String(message),
+          priority: 1
+        },
+        () => {
+          // Reading lastError also clears it; a value means creation failed.
+          resolve(!chrome.runtime.lastError);
+        }
+      );
+    } catch (e) {
+      resolve(false);
+    }
+  });
+}
+
+if (chrome.notifications) {
+  chrome.notifications.onClicked.addListener((id) => {
+    if (id !== NOTIFY_UPDATE && id !== NOTIFY_UPDATED) return;
+    chrome.notifications.clear(id);
+    openUpdatePage();
+  });
+}
+
+function openUpdatePage() {
+  chrome.tabs.create({ url: chrome.runtime.getURL("src/update.html") });
+}
+
+/* Hide the badge/banner for a version without changing the check result. */
+async function dismissUpdate(version) {
+  const status = await readUpdateStatus();
+  const value = String(version || "").trim() || (status && status.latestVersion) || "";
+  try {
+    await chrome.storage.local.set({ [AR.UPDATE.SEEN_KEY]: value });
+    await chrome.storage.local.remove(AR.UPDATE.NOTICE_KEY);
+  } catch (e) {
+    /* best effort */
+  }
+  await refreshUpdateBadge();
 }
 
 /* ----------------------------------------------------------- translation */

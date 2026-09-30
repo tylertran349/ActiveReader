@@ -148,6 +148,55 @@ test("saved-word helpers defend against a corrupted value", async () => {
   assert.strictEqual((await AR.getSavedWords()).length, 1);
 });
 
+test("update settings default on and coerce from garbage", () => {
+  const d = AR.normalizeSettings({});
+  assert.strictEqual(d.autoCheckUpdates, true);
+  assert.strictEqual(d.notifyUpdates, true);
+
+  const s = AR.normalizeSettings({ autoCheckUpdates: "yes", notifyUpdates: 0 });
+  assert.strictEqual(s.autoCheckUpdates, true); // non-boolean falls back
+  assert.strictEqual(s.notifyUpdates, true);
+
+  assert.strictEqual(AR.normalizeSettings({ autoCheckUpdates: false, notifyUpdates: false }).autoCheckUpdates, false);
+});
+
+test("parseVersion accepts plain, v-prefixed and prerelease versions", () => {
+  assert.deepStrictEqual(AR.parseVersion("1.2.3").parts, [1, 2, 3]);
+  assert.deepStrictEqual(AR.parseVersion("v1.2.3").parts, [1, 2, 3]);
+  assert.deepStrictEqual(AR.parseVersion("1.2.3.4").parts, [1, 2, 3, 4]);
+  assert.strictEqual(AR.parseVersion("1.2.3-beta.1").pre, "beta.1");
+  assert.strictEqual(AR.parseVersion("1.2.3+build.5").pre, ""); // build metadata ignored
+  assert.strictEqual(AR.compareVersions("1.2.3+build.5", "1.2.3"), 0);
+  assert.strictEqual(AR.parseVersion("not-a-version"), null);
+  assert.strictEqual(AR.parseVersion(""), null);
+});
+
+test("compareVersions orders versions and treats releases above prereleases", () => {
+  assert.strictEqual(AR.compareVersions("1.0.0", "1.0.0"), 0);
+  assert.strictEqual(AR.compareVersions("1.0.0", "1.0.1"), -1);
+  assert.strictEqual(AR.compareVersions("1.2.0", "1.1.9"), 1);
+  assert.strictEqual(AR.compareVersions("v1.0.0", "1.0.0"), 0);
+  assert.strictEqual(AR.compareVersions("1.0", "1.0.0"), 0); // trailing zero padded
+  assert.strictEqual(AR.compareVersions("1.0.0", "1.0.0-beta"), 1);
+  assert.strictEqual(AR.compareVersions("1.0.0-beta", "1.0.0"), -1);
+  assert.strictEqual(AR.compareVersions("1.0.0", "garbage"), 1);
+  assert.strictEqual(AR.compareVersions("garbage", "1.0.0"), -1);
+});
+
+test("isNewerVersion only reports strict advances", () => {
+  assert.strictEqual(AR.isNewerVersion("1.1.0", "1.0.0"), true);
+  assert.strictEqual(AR.isNewerVersion("1.0.0", "1.0.0"), false);
+  assert.strictEqual(AR.isNewerVersion("0.9.9", "1.0.0"), false);
+});
+
+test("hasUpdate recomputes availability instead of trusting the stored flag", () => {
+  // Runs against the version loaded from the manifest (1.1.0 in the fallback).
+  assert.strictEqual(AR.hasUpdate({ latestVersion: "9.9.9", updateAvailable: false }), true);
+  assert.strictEqual(AR.hasUpdate({ latestVersion: "0.0.1", updateAvailable: true }), false);
+  assert.strictEqual(AR.hasUpdate({ latestVersion: "" }), false);
+  assert.strictEqual(AR.hasUpdate(null), false);
+});
+
 (async () => {
   console.log("config.js");
   let passed = 0;

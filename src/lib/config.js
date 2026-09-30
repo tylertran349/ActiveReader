@@ -8,7 +8,118 @@
 
   const AR = (globalThis.AR = globalThis.AR || {});
 
-  AR.VERSION = "1.0.0";
+  /* The running version, read straight from the manifest so it can never drift
+   * from what Chrome reports. The literal is only a fallback for the Node tests,
+   * which load this file without an extension context. */
+  AR.VERSION = (function () {
+    try {
+      return chrome.runtime.getManifest().version;
+    } catch (e) {
+      return "1.1.0";
+    }
+  })();
+
+  /* --------------------------------------------------------------- updates */
+
+  /* ActiveReader is distributed from a GitHub repository and loaded unpacked, so
+   * the version in the main branch's manifest.json is the source of truth for
+   * "is there a newer build?". The background worker reads it periodically and
+   * the popup, options page and update page surface the result. */
+  const UPDATE_OWNER = "tylertran349";
+  const UPDATE_REPO = "ActiveReader";
+  const UPDATE_BRANCH = "main";
+
+  AR.UPDATE = {
+    OWNER: UPDATE_OWNER,
+    REPO: UPDATE_REPO,
+    BRANCH: UPDATE_BRANCH,
+    // How often the background checks on its own while auto-check is enabled.
+    CHECK_INTERVAL_MINUTES: 12 * 60,
+    ALARM_NAME: "ar-update-check",
+    STATUS_KEY: "updateStatus", // last check result (chrome.storage.local)
+    NOTIFIED_KEY: "updateNotifiedVersion", // stops duplicate notifications
+    SEEN_KEY: "updateSeenVersion", // version the user has dismissed
+    NOTICE_KEY: "updateNotice" // set when the extension itself was updated
+  };
+
+  AR.UPDATE.repoUrl = "https://github.com/" + UPDATE_OWNER + "/" + UPDATE_REPO;
+  AR.UPDATE.releasesUrl = AR.UPDATE.repoUrl + "/releases";
+  AR.UPDATE.commitsUrl = AR.UPDATE.repoUrl + "/commits/" + UPDATE_BRANCH;
+  AR.UPDATE.zipUrl = AR.UPDATE.repoUrl + "/archive/refs/heads/" + UPDATE_BRANCH + ".zip";
+  AR.UPDATE.manifestUrl =
+    "https://raw.githubusercontent.com/" +
+    UPDATE_OWNER +
+    "/" +
+    UPDATE_REPO +
+    "/" +
+    UPDATE_BRANCH +
+    "/manifest.json";
+
+  /* Versions are dotted integers, optionally prefixed with "v" and suffixed with
+   * a prerelease tag. Parsing is deliberately loose because the value can come
+   * from a Git tag as easily as from manifest.json. */
+  AR.parseVersion = function (value) {
+    const text = String(value == null ? "" : value).trim().replace(/^v/i, "");
+    // Optional `-prerelease` and `+build`; build metadata is ignored (semver).
+    const match = text.match(/^(\d+(?:\.\d+)*)(?:-([^+]*))?(?:\+(.*))?$/);
+    if (!match) return null;
+    return {
+      parts: match[1].split(".").map((n) => parseInt(n, 10) || 0),
+      pre: match[2] || ""
+    };
+  };
+
+  /* Compare two versions: -1 when a < b, 0 when equal, 1 when a > b. A missing
+   * or invalid version sorts below a valid one and a release (1.0.0) sorts above
+   * its prerelease (1.0.0-beta). */
+  AR.compareVersions = function (a, b) {
+    const pa = AR.parseVersion(a);
+    const pb = AR.parseVersion(b);
+    if (!pa && !pb) return 0;
+    if (!pa) return -1;
+    if (!pb) return 1;
+
+    const len = Math.max(pa.parts.length, pb.parts.length);
+    for (let i = 0; i < len; i++) {
+      const x = pa.parts[i] || 0;
+      const y = pb.parts[i] || 0;
+      if (x !== y) return x < y ? -1 : 1;
+    }
+    if (pa.pre === pb.pre) return 0;
+    if (!pa.pre) return 1;
+    if (!pb.pre) return -1;
+    return pa.pre < pb.pre ? -1 : 1;
+  };
+
+  AR.isNewerVersion = function (candidate, current) {
+    return AR.compareVersions(candidate, current) > 0;
+  };
+
+  /* Whether a stored check result points at a newer build than the one running.
+   * Recomputed from the version strings so a stale flag in storage (for example
+   * after the extension itself was updated) can never win. */
+  AR.hasUpdate = function (status) {
+    return !!(status && status.latestVersion && AR.isNewerVersion(status.latestVersion, AR.VERSION));
+  };
+
+  /* Read the last update check + any "just updated" notice. UI surfaces call
+   * this directly so they can render without messaging the service worker. */
+  AR.getUpdateStatus = async function () {
+    try {
+      const store = await chrome.storage.local.get([
+        AR.UPDATE.STATUS_KEY,
+        AR.UPDATE.NOTICE_KEY,
+        AR.UPDATE.SEEN_KEY
+      ]);
+      return {
+        status: store[AR.UPDATE.STATUS_KEY] || null,
+        notice: store[AR.UPDATE.NOTICE_KEY] || null,
+        seen: store[AR.UPDATE.SEEN_KEY] || ""
+      };
+    } catch (e) {
+      return { status: null, notice: null, seen: "" };
+    }
+  };
 
   /* ---------------------------------------------------------------- defaults */
 
@@ -50,7 +161,11 @@
     panelAccent: "indigo", // indigo | emerald | rose | amber | violet
     panelWidth: 0, // 0 = use the default panel width
     panelHeight: 0, // 0 = fit the content
-    autoSaveLookups: false
+    autoSaveLookups: false,
+
+    // Updates
+    autoCheckUpdates: true, // look for a newer build on startup and on a timer
+    notifyUpdates: true // show a desktop notification when one is found
   };
 
   // NOTE: no hardcoded list of Gemini models. The model ID is free text so new
@@ -226,7 +341,9 @@
       panelAccent: has(AR.ACCENTS, r.panelAccent) ? r.panelAccent : d.panelAccent,
       panelWidth: num(r.panelWidth, d.panelWidth, 0, 20000),
       panelHeight: num(r.panelHeight, d.panelHeight, 0, 20000),
-      autoSaveLookups: bool(r.autoSaveLookups, d.autoSaveLookups)
+      autoSaveLookups: bool(r.autoSaveLookups, d.autoSaveLookups),
+      autoCheckUpdates: bool(r.autoCheckUpdates, d.autoCheckUpdates),
+      notifyUpdates: bool(r.notifyUpdates, d.notifyUpdates)
     };
   };
 
@@ -455,6 +572,9 @@
     TEST_GEMINI: "ar-test-gemini",
     LIST_MODELS: "ar-list-models",
     OPEN_OPTIONS: "ar-open-options",
+    CHECK_UPDATES: "ar-check-updates",
+    DISMISS_UPDATE: "ar-dismiss-update",
+    OPEN_UPDATE_PAGE: "ar-open-update-page",
     TARGET_OFFSCREEN: "offscreen",
     TARGET_BG: "bg"
   };

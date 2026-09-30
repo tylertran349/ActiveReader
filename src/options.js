@@ -46,6 +46,8 @@
     bindCheck("auto-translate", "autoTranslate");
     bindCheck("auto-save", "autoSaveLookups");
     bindCheck("quiz-explain", "quizExplain");
+    bindCheck("auto-check-updates", "autoCheckUpdates");
+    bindCheck("notify-updates", "notifyUpdates");
 
     // Ranges
     bindRange("tts-rate", "ttsRate", "tts-rate-val", (v) => v.toFixed(2));
@@ -83,10 +85,16 @@
     $("import-settings").addEventListener("click", () => $("import-file").click());
     $("import-file").addEventListener("change", onImportFileChosen);
 
+    $("update-repo-link").href = AR.UPDATE.repoUrl;
+    $("check-updates").addEventListener("click", checkUpdates);
+    $("open-update-page").addEventListener("click", () => send({ type: AR.MSG.OPEN_UPDATE_PAGE }));
+
     maybeAutofillModel();
+    await renderUpdateStatus();
     await renderVocab();
     chrome.storage.onChanged.addListener((changes, area) => {
       if (area === "local" && changes.savedWords) renderVocab();
+      if (area === "local" && changes[AR.UPDATE.STATUS_KEY]) renderUpdateStatus();
     });
   }
 
@@ -331,6 +339,64 @@
     await AR.saveSettings(defaults);
     settings = await AR.getSettings();
     location.reload();
+  }
+
+  /* ------------------------------------------------------------- updates */
+
+  async function checkUpdates() {
+    const btn = $("check-updates");
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = "Checking…";
+
+    const res = await send({ type: AR.MSG.CHECK_UPDATES });
+
+    btn.disabled = false;
+    btn.textContent = label;
+
+    if (res && typeof res === "object" && "checkedAt" in res) renderUpdateStatus(res);
+    else renderUpdateStatus();
+  }
+
+  async function renderUpdateStatus(fresh) {
+    const status = fresh || (await AR.getUpdateStatus()).status;
+    const badge = $("update-badge");
+    const detail = $("update-detail");
+
+    if (!status) {
+      badge.textContent = "Not checked yet";
+      badge.className = "update-badge";
+      detail.textContent = "";
+      $("update-status").textContent = "";
+      return;
+    }
+
+    if (AR.hasUpdate(status)) {
+      badge.textContent = "Update available";
+      badge.className = "update-badge warn";
+      detail.textContent = "Latest is v" + status.latestVersion + " — you have v" + AR.VERSION + ".";
+    } else if (status.ok) {
+      badge.textContent = "Up to date";
+      badge.className = "update-badge ok";
+      detail.textContent = "You have the latest version (v" + AR.VERSION + ").";
+    } else {
+      badge.textContent = "Couldn't check";
+      badge.className = "update-badge error";
+      detail.textContent = status.error || "Check your connection and try again.";
+    }
+
+    $("update-status").textContent = status.checkedAt ? "Last checked " + timeAgo(status.checkedAt) + "." : "";
+  }
+
+  function timeAgo(ts) {
+    const seconds = Math.max(0, Math.round((Date.now() - ts) / 1000));
+    if (seconds < 45) return "just now";
+    const minutes = Math.round(seconds / 60);
+    if (minutes < 60) return minutes + (minutes === 1 ? " minute ago" : " minutes ago");
+    const hours = Math.round(minutes / 60);
+    if (hours < 24) return hours + (hours === 1 ? " hour ago" : " hours ago");
+    const days = Math.round(hours / 24);
+    return days + (days === 1 ? " day ago" : " days ago");
   }
 
   /* ----------------------------------------------------------- vocabulary */
