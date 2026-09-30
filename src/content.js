@@ -356,9 +356,13 @@
 
   function openPanel(reposition) {
     if (!panelEl) return;
+    /* Only place the panel next to the selection when it first opens. Once it
+     * is open (and possibly dragged somewhere else by the reader), keep it put
+     * so translating another phrase does not yank it around the page. */
+    const wasOpen = panelEl.classList.contains("open");
     hideToolbar();
     panelEl.classList.add("open");
-    pendingReposition = !!reposition || pendingReposition;
+    pendingReposition = !!reposition && !wasOpen;
     render();
   }
 
