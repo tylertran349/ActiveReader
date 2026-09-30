@@ -706,6 +706,10 @@ async function handleTts(msg, sender) {
 
   clearOffscreenCloseTimer();
 
+  // Only one TTS track may play at a time: silence the current one, whichever
+  // provider it uses, before starting the new one.
+  await stopAllTts();
+
   const provider = msg.provider || settings.ttsProvider;
   const lang = msg.lang || settings.targetLang;
 
@@ -768,7 +772,8 @@ function handleBrowserTts(text, lang, settingsArg) {
   })();
 }
 
-async function stopTts() {
+/* Stop every TTS track, regardless of which provider started it. */
+async function stopAllTts() {
   try {
     chrome.tts.stop();
   } catch (e) {
@@ -779,6 +784,10 @@ async function stopTts() {
   } catch (e) {
     /* offscreen may not exist */
   }
+}
+
+async function stopTts() {
+  await stopAllTts();
   scheduleOffscreenClose();
 }
 
