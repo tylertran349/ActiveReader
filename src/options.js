@@ -7,6 +7,7 @@
 
   let settings = null;
   let saveTimer = null;
+  let vocabSearchTimer = null;
   let pending = {};
   let autofillTried = false;
 
@@ -71,7 +72,10 @@
     $("preview").addEventListener("click", previewVoice);
     $("api-key").addEventListener("change", maybeAutofillModel);
     $("reset-all").addEventListener("click", resetAll);
-    $("vocab-search").addEventListener("input", renderVocab);
+    $("vocab-search").addEventListener("input", () => {
+      clearTimeout(vocabSearchTimer);
+      vocabSearchTimer = setTimeout(renderVocab, 120);
+    });
     $("export-json").addEventListener("click", () => exportVocab("json"));
     $("export-csv").addEventListener("click", () => exportVocab("csv"));
     $("clear-vocab").addEventListener("click", clearVocab);
@@ -137,19 +141,7 @@
   }
 
   function parseSites(value) {
-    const seen = {};
-    const out = [];
-    String(value || "")
-      .split(/[\n,;]+/)
-      .map((s) => s.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, ""))
-      .filter(Boolean)
-      .forEach((host) => {
-        if (!seen[host]) {
-          seen[host] = true;
-          out.push(host);
-        }
-      });
-    return out;
+    return AR.parseSiteList(value);
   }
 
   /* --------------------------------------------------------------- saving */
@@ -158,7 +150,9 @@
     Object.assign(pending, patch);
     Object.assign(settings, patch);
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(flush, 300);
+    // Keep well under chrome.storage.sync's write-per-minute quota even when
+    // the user types or drags a slider quickly.
+    saveTimer = setTimeout(flush, 700);
   }
 
   async function flush() {
@@ -342,8 +336,7 @@
   /* ----------------------------------------------------------- vocabulary */
 
   async function getVocab() {
-    const { savedWords = [] } = await chrome.storage.local.get({ savedWords: [] });
-    return savedWords;
+    return AR.getSavedWords();
   }
 
   async function renderVocab() {
@@ -383,7 +376,7 @@
     $("vocab-list").querySelectorAll(".del").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const all2 = await getVocab();
-        await chrome.storage.local.set({ savedWords: all2.filter((w) => w.id !== btn.dataset.id) });
+        await AR.saveSavedWords(all2.filter((w) => w.id !== btn.dataset.id));
       });
     });
   }
@@ -433,7 +426,7 @@
     const all = await getVocab();
     if (!all.length) return;
     if (!confirm(`Delete all ${all.length} saved words? This cannot be undone.`)) return;
-    await chrome.storage.local.set({ savedWords: [] });
+    await AR.saveSavedWords([]);
   }
 
   /* -------------------------------------------------------- backup/restore */
@@ -442,7 +435,7 @@
    * after a full profile clean. Contains the Gemini API key in plain text. */
   async function exportBackup() {
     const current = await AR.getSettings();
-    const { savedWords = [] } = await chrome.storage.local.get({ savedWords: [] });
+    const savedWords = await AR.getSavedWords();
     const payload = {
       app: "ActiveReader",
       kind: "backup",
@@ -475,10 +468,7 @@
     if (data && data.settings && typeof data.settings === "object") incoming = data.settings;
     else if (data && typeof data === "object" && !Array.isArray(data)) incoming = data;
 
-    const clean = {};
-    Object.keys(AR.DEFAULTS).forEach((key) => {
-      if (incoming && Object.prototype.hasOwnProperty.call(incoming, key)) clean[key] = incoming[key];
-    });
+    const clean = AR.normalizePatch(incoming);
     if (!Object.keys(clean).length) {
       setBackupStatus("That file doesn't contain any ActiveReader settings.", true);
       return;
@@ -496,12 +486,12 @@
 
     const vocab = Array.isArray(data && data.vocabulary) ? data.vocabulary : [];
     if (vocab.length) {
-      const { savedWords = [] } = await chrome.storage.local.get({ savedWords: [] });
+      const savedWords = await AR.getSavedWords();
       const byId = new Map();
       savedWords.concat(vocab).forEach((w) => {
         if (w && w.id != null) byId.set(String(w.id), w);
       });
-      await chrome.storage.local.set({ savedWords: Array.from(byId.values()).slice(0, 2000) });
+      await AR.saveSavedWords(Array.from(byId.values()));
     }
 
     setBackupStatus("Restored. Reloading…");

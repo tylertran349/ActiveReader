@@ -120,8 +120,11 @@
     { code: "af", label: "Afrikaans", gemini: "Afrikaans", tts: "af", locale: "af-ZA" }
   ];
 
+  /* Index the language list once so lookups stay O(1) when called often. */
+  const languageByCode = new Map(AR.LANGUAGES.map((l) => [l.code, l]));
+
   AR.langByCode = function (code) {
-    return AR.LANGUAGES.find((l) => l.code === code) || null;
+    return languageByCode.get(code) || null;
   };
 
   AR.langName = function (code) {
@@ -152,6 +155,92 @@
    * make that recoverable we keep a spare copy in chrome.storage.local on every
    * save, and put it back if sync storage ever comes back empty. */
   AR.BACKUP_KEY = "settingsBackup";
+
+  /* Clean a per-site block list (used by the options textarea, imported backup
+   * files and storage). Accepts an array or a newline/comma/semicolon string,
+   * strips schemes, paths and leading wildcards, and removes duplicates. */
+  AR.parseSiteList = function (value) {
+    const raw = Array.isArray(value) ? value : String(value == null ? "" : value).split(/[\n,;]+/);
+    const seen = Object.create(null);
+    const out = [];
+    raw.forEach(function (item) {
+      const host = String(item || "")
+        .trim()
+        .toLowerCase()
+        .replace(/^\*\./, "")
+        .replace(/^\./, "")
+        .replace(/^https?:\/\//, "")
+        .replace(/\/.*$/, "")
+        .replace(/:\d+$/, "");
+      if (host && !seen[host]) {
+        seen[host] = true;
+        out.push(host);
+      }
+    });
+    return out;
+  };
+
+  /* Coerce an arbitrary object into a fully-formed, correctly-typed settings
+   * object. Storage and imported backup files can contain anything, so every
+   * value is validated and clamped here; callers can then trust the shape. */
+  AR.normalizeSettings = function (raw) {
+    const d = AR.DEFAULTS;
+    const r = raw && typeof raw === "object" ? raw : {};
+
+    const str = (v, fallback) => (typeof v === "string" ? v : fallback);
+    const bool = (v, fallback) => (typeof v === "boolean" ? v : fallback);
+    const num = (v, fallback, min, max) => {
+      // Reject null/booleans/objects/empty strings so they fall back to the
+      // default rather than coercing to 0 and clamping to the minimum.
+      if (v === "" || (typeof v !== "number" && typeof v !== "string")) return fallback;
+      const n = Number(v);
+      if (!Number.isFinite(n)) return fallback;
+      return Math.min(Math.max(n, min), max);
+    };
+    const oneOf = (v, allowed, fallback) => (allowed.indexOf(v) !== -1 ? v : fallback);
+    const lang = (v, fallback) => (AR.langByCode(v) ? v : fallback);
+    const has = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
+
+    return {
+      geminiApiKey: str(r.geminiApiKey, d.geminiApiKey),
+      geminiModel: str(r.geminiModel, d.geminiModel).trim(),
+      targetLang: lang(r.targetLang, d.targetLang),
+      baseLang: lang(r.baseLang, d.baseLang),
+      ttsProvider: oneOf(r.ttsProvider, ["google", "browser"], d.ttsProvider),
+      ttsRate: num(r.ttsRate, d.ttsRate, 0.5, 2),
+      ttsPitch: num(r.ttsPitch, d.ttsPitch, 0, 2),
+      showToolbar: bool(r.showToolbar, d.showToolbar),
+      autoTranslate: bool(r.autoTranslate, d.autoTranslate),
+      minSelectionLength: num(r.minSelectionLength, d.minSelectionLength, 1, 100),
+      maxSelectionLength: num(r.maxSelectionLength, d.maxSelectionLength, 200, 20000),
+      disabledSites: AR.parseSiteList(r.disabledSites == null ? d.disabledSites : r.disabledSites),
+      translationEngine: oneOf(r.translationEngine, ["google", "gemini"], d.translationEngine),
+      quizTypes: Array.isArray(r.quizTypes)
+        ? r.quizTypes.filter((t) => AR.QUIZ_TYPES.indexOf(t) !== -1)
+        : d.quizTypes.slice(),
+      quizDifficulty: oneOf(r.quizDifficulty, ["beginner", "intermediate", "advanced"], d.quizDifficulty),
+      quizCount: num(r.quizCount, d.quizCount, 1, 10),
+      quizLanguage: oneOf(r.quizLanguage, ["target", "base", "both"], d.quizLanguage),
+      quizExplain: bool(r.quizExplain, d.quizExplain),
+      theme: oneOf(r.theme, ["auto", "light", "dark"], d.theme),
+      panelAccent: has(AR.ACCENTS, r.panelAccent) ? r.panelAccent : d.panelAccent,
+      panelWidth: num(r.panelWidth, d.panelWidth, 0, 20000),
+      panelHeight: num(r.panelHeight, d.panelHeight, 0, 20000),
+      autoSaveLookups: bool(r.autoSaveLookups, d.autoSaveLookups)
+    };
+  };
+
+  /* Normalize only the keys present in a patch, so a partial save never writes
+   * defaults over settings that changed somewhere else. */
+  AR.normalizePatch = function (patch) {
+    if (!patch || typeof patch !== "object") return {};
+    const full = AR.normalizeSettings(Object.assign({}, AR.DEFAULTS, patch));
+    const out = {};
+    Object.keys(patch).forEach((key) => {
+      if (Object.prototype.hasOwnProperty.call(full, key)) out[key] = full[key];
+    });
+    return out;
+  };
 
   /* Keep only the known settings keys so the backup never grows junk. */
   function pickSettings(source) {
@@ -196,7 +285,7 @@
     try {
       stored = await chrome.storage.sync.get(null);
     } catch (e) {
-      return Object.assign({}, AR.DEFAULTS);
+      return AR.normalizeSettings({});
     }
     stored = stored || {};
 
@@ -207,24 +296,49 @@
       const backup = await AR.readLocalBackup();
       if (backup) {
         try {
-          await chrome.storage.sync.set(backup.settings);
+          await chrome.storage.sync.set(AR.normalizePatch(backup.settings));
         } catch (e) {
           /* restore is best effort; still return the recovered values */
         }
-        return Object.assign({}, AR.DEFAULTS, backup.settings);
+        return AR.normalizeSettings(Object.assign({}, AR.DEFAULTS, backup.settings));
       }
     }
 
-    return Object.assign({}, AR.DEFAULTS, stored);
+    return AR.normalizeSettings(Object.assign({}, AR.DEFAULTS, stored));
   };
 
   AR.saveSettings = async function (patch) {
-    await chrome.storage.sync.set(patch);
+    const clean = AR.normalizePatch(patch);
+    if (!Object.keys(clean).length) return;
+    await chrome.storage.sync.set(clean);
     try {
       await AR.writeLocalBackup(await chrome.storage.sync.get(null));
     } catch (e) {
       /* best effort */
     }
+  };
+
+  /* ------------------------------------------------------------ vocabulary */
+
+  /* Saved words live in chrome.storage.local. Both helpers defend against a
+   * corrupted or non-array value so callers can always iterate the result. */
+  AR.VOCAB_KEY = "savedWords";
+  AR.VOCAB_MAX = 2000;
+
+  AR.getSavedWords = async function () {
+    try {
+      const store = await chrome.storage.local.get(AR.VOCAB_KEY);
+      const list = store[AR.VOCAB_KEY];
+      return Array.isArray(list) ? list : [];
+    } catch (e) {
+      return [];
+    }
+  };
+
+  AR.saveSavedWords = async function (list) {
+    const clean = Array.isArray(list) ? list.slice(0, AR.VOCAB_MAX) : [];
+    await chrome.storage.local.set({ [AR.VOCAB_KEY]: clean });
+    return clean;
   };
 
   AR.escapeHtml = function (str) {

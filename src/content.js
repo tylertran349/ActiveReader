@@ -290,12 +290,24 @@
         return;
       }
 
-      if (current.text !== info.text) resetForText(info.text);
+      const changed = current.text !== info.text;
+      if (changed) resetForText(info.text);
       current.text = info.text;
       current.rect = info.rect;
 
       if (settings.showToolbar && !isDisabledSite()) showToolbar();
       else hideToolbar();
+
+      // Auto-translate reacts to a new selection. Re-selecting the same text
+      // while the panel is already open is a no-op, so we do not re-render or
+      // re-request anything. If the panel is closed, reopen it.
+      if (settings.autoTranslate && !isDisabledSite()) {
+        const panelOpen = panelEl && panelEl.classList.contains("open");
+        if (changed || !panelOpen) {
+          if (!panelOpen || tab === "translate") openTranslate();
+          else if (state.translation.status === "idle") runTranslate();
+        }
+      }
     }, 0);
   }
 
@@ -304,11 +316,15 @@
   function getSelectionInfo() {
     const active = document.activeElement;
     if (active && (active.tagName === "INPUT" || active.tagName === "TEXTAREA")) {
-      const start = active.selectionStart;
-      const end = active.selectionEnd;
-      if (typeof start === "number" && typeof end === "number" && end > start) {
-        const text = String(active.value || "").slice(start, end).trim();
-        if (text) return { text, rect: normRect(active.getBoundingClientRect()) };
+      try {
+        const start = active.selectionStart;
+        const end = active.selectionEnd;
+        if (typeof start === "number" && typeof end === "number" && end > start) {
+          const text = String(active.value || "").slice(start, end).trim();
+          if (text) return { text, rect: normRect(active.getBoundingClientRect()) };
+        }
+      } catch (e) {
+        /* some input types do not expose a text selection */
       }
     }
 
@@ -327,9 +343,9 @@
   }
 
   function onKeyDown(e) {
-    if (e.key === "Escape" && panelEl && panelEl.classList.contains("open")) {
-      closePanel();
-    }
+    if (e.key !== "Escape") return;
+    hideToolbar();
+    if (panelEl && panelEl.classList.contains("open")) closePanel();
   }
 
   /* Hide the toolbar on page scroll, but not when scrolling inside our panel. */
@@ -350,10 +366,7 @@
     const hostname = (location.hostname || "").toLowerCase();
     if (!hostname) return false;
     return (settings.disabledSites || []).some((site) => {
-      const s = String(site || "")
-        .toLowerCase()
-        .replace(/^\*\./, "")
-        .replace(/^\./, "");
+      const s = String(site || "").trim().toLowerCase();
       return s && (hostname === s || hostname.endsWith("." + s));
     });
   }
@@ -1014,7 +1027,9 @@
       answer: q.answer,
       userAnswer,
       qType: q.type,
-      text: quizText()
+      // Grade against the passage the quiz was built from, even if the reader
+      // has since highlighted something else.
+      text: state.quiz.text || quizText()
     });
 
     // A newer selection appeared while we were waiting — drop this result but
@@ -1392,8 +1407,8 @@
       return undefined;
     }
     if (msg.type === MSG.TTS_STATE) {
-      if (msg.state === "ended" || msg.state === "failed") {
-        state.audio = { status: msg.state === "failed" ? "failed" : "ended", provider: state.audio.provider };
+      if (msg.state === "ended" || msg.state === "failed" || msg.state === "error") {
+        state.audio = { status: msg.state, provider: state.audio.provider };
         if (tab === "audio" && panelEl && panelEl.classList.contains("open")) render();
       }
       return undefined;
@@ -1424,6 +1439,12 @@
       settings = next;
       applyTheme();
       applyPanelSize();
+      // Pick up new quiz defaults until the reader has generated a quiz (but
+      // never while a generation is in flight).
+      if (!state.quiz.questions.length && state.quiz.status !== "loading") {
+        state.quiz.config = null;
+      }
+      if (badgeEl) badgeEl.textContent = AR.langLabel(settings.targetLang);
       if (isDisabledSite()) {
         hideToolbar();
         closePanel();

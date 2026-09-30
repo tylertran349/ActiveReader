@@ -15,9 +15,15 @@ let offscreenCloseTimer = null;
 /* ------------------------------------------------------------ lifecycle */
 
 chrome.runtime.onInstalled.addListener(async () => {
-  const existing = await chrome.storage.sync.get(AR.DEFAULTS);
-  await AR.saveSettings(Object.assign({}, AR.DEFAULTS, existing));
+  // Menus must always be rebuilt, even if seeding settings fails.
   buildContextMenus();
+  try {
+    // getSettings() also restores from the local mirror if sync was wiped, so
+    // run it first and persist the result instead of blindly writing defaults.
+    await AR.saveSettings(await AR.getSettings());
+  } catch (e) {
+    /* seeding is best effort */
+  }
 });
 
 chrome.runtime.onStartup.addListener(buildContextMenus);
@@ -170,11 +176,17 @@ function forwardTtsState(state) {
 
 const TRANSLATION_CACHE_KEY = "translationCache";
 
+/* Small, fast, non-cryptographic string hash (djb2). Used for cache keys. */
+function hashString(str) {
+  const s = String(str);
+  let hash = 5381;
+  for (let i = 0; i < s.length; i++) hash = ((hash << 5) + hash + s.charCodeAt(i)) | 0;
+  return hash >>> 0;
+}
+
 /* Cheap stable key for a (text, target, engine) triple. */
 function translationCacheKey(text, target, engine) {
-  let hash = 5381;
-  for (let i = 0; i < text.length; i++) hash = ((hash << 5) + hash + text.charCodeAt(i)) | 0;
-  return engine + "|" + target + "|" + text.length + "|" + (hash >>> 0);
+  return engine + "|" + target + "|" + text.length + "|" + hashString(text).toString(36);
 }
 
 async function getCachedTranslation(key) {
@@ -349,7 +361,7 @@ async function callGemini(prompt, settings, schema, temperature, maxOutputTokens
 function geminiErrorMessage(status, detail) {
   const suffix = detail ? " — " + detail : "";
   if (status === 400) return "Gemini rejected the request (400). Check the model ID supports this prompt." + suffix;
-  if (status === 401 || status === 403) return "Gemini refused the API key (403). Check that the key is valid and the API is enabled." + suffix;
+  if (status === 401 || status === 403) return "Gemini refused the API key (" + status + "). Check that the key is valid and the API is enabled." + suffix;
   if (status === 404) return "Gemini model not found (404). Open settings and pick a model with “Fetch models”." + suffix;
   if (status === 429) return "Gemini rate limit or quota reached (429). Wait a moment or check your plan." + suffix;
   if (status >= 500) return "Gemini had a server error (" + status + "). Try again shortly." + suffix;
@@ -359,7 +371,7 @@ function geminiErrorMessage(status, detail) {
 async function testGemini() {
   const settings = await AR.getSettings();
   try {
-    const out = await callGemini("Reply with exactly: OK", settings, null, 0);
+    const out = await callGemini("Reply with exactly: OK", settings, null, 0, 16);
     return { ok: true, reply: out.trim().slice(0, 60) };
   } catch (e) {
     return { ok: false, error: e.message };
@@ -370,12 +382,6 @@ async function testGemini() {
  * list. Only models that support generateContent are returned. Results are
  * cached for a while to avoid repeating the call on every options visit. */
 const MODEL_CACHE_KEY = "modelCache";
-
-function hashString(str) {
-  let hash = 5381;
-  for (let i = 0; i < str.length; i++) hash = ((hash << 5) + hash + str.charCodeAt(i)) | 0;
-  return (hash >>> 0).toString(36);
-}
 
 async function getCachedModels(keyTag) {
   try {
@@ -402,7 +408,7 @@ async function listModels(force) {
   const key = String(settings.geminiApiKey || "").trim();
   if (!key) return { ok: false, error: "Add a Gemini API key first." };
 
-  const keyTag = hashString(key);
+  const keyTag = hashString(key).toString(36);
 
   if (!force) {
     const cached = await getCachedModels(keyTag);
@@ -410,18 +416,29 @@ async function listModels(force) {
   }
 
   try {
-    const url =
-      "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200&key=" +
-      encodeURIComponent(key);
-    const res = await fetch(url, { method: "GET" });
-    const data = await res.json().catch(() => ({}));
+    const collected = [];
+    let pageToken = "";
+    // The API paginates; walk every page so no model is silently missed.
+    for (let page = 0; page < 10; page++) {
+      const url =
+        "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200" +
+        (pageToken ? "&pageToken=" + encodeURIComponent(pageToken) : "") +
+        "&key=" +
+        encodeURIComponent(key);
+      const res = await fetch(url, { method: "GET" });
+      const data = await res.json().catch(() => ({}));
 
-    if (!res.ok) {
-      const message = (data && data.error && data.error.message) || "Could not list models (" + res.status + ").";
-      return { ok: false, error: message };
+      if (!res.ok) {
+        const message = (data && data.error && data.error.message) || "Could not list models (" + res.status + ").";
+        return { ok: false, error: message };
+      }
+
+      if (Array.isArray(data.models)) collected.push(...data.models);
+      pageToken = data.nextPageToken || "";
+      if (!pageToken) break;
     }
 
-    const models = (data.models || [])
+    const models = collected
       .filter(
         (m) =>
           Array.isArray(m.supportedGenerationMethods) &&
@@ -847,7 +864,7 @@ async function handleSave(msg) {
   const text = String(entry.text || "").trim();
   if (!text) return { ok: false, error: "Nothing to save." };
 
-  const { savedWords = [] } = await chrome.storage.local.get({ savedWords: [] });
+  const savedWords = await AR.getSavedWords();
   const key = (text + "\u0000" + (entry.lang || "")).toLowerCase();
 
   const record = {
@@ -865,7 +882,7 @@ async function handleSave(msg) {
     (w) => (String(w.text) + "\u0000" + (w.lang || "")).toLowerCase() !== key
   );
   filtered.unshift(record);
-  await chrome.storage.local.set({ savedWords: filtered.slice(0, 2000) });
+  await AR.saveSavedWords(filtered);
 
   return { ok: true, entry: record };
 }

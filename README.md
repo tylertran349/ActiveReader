@@ -90,6 +90,7 @@ Changes save automatically.
 ```
 manifest.json            MV3 manifest
 icons/                   toolbar + store icons
+tests/config.test.js     unit tests for the shared config helpers
 src/
   background.js          service worker: Gemini, translation, TTS, context menus
   content.js             selection toolbar + Translate/Audio/Quiz panel
@@ -98,6 +99,15 @@ src/
   popup.html/.js/.css    toolbar popup (quick settings + recent vocabulary)
   options.html/.js/.css  full settings page
   lib/config.js          shared defaults, language list, storage helpers
+```
+
+### Running the tests
+
+The shared helpers in `src/lib/config.js` have unit tests that run with plain
+Node and no dependencies:
+
+```
+node tests/config.test.js
 ```
 
 ### Why an offscreen document?

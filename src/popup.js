@@ -71,7 +71,7 @@
   }
 
   async function renderVocab() {
-    const { savedWords = [] } = await chrome.storage.local.get({ savedWords: [] });
+    const savedWords = await AR.getSavedWords();
     const recent = savedWords.slice(0, 8);
 
     els.vocabEmpty.hidden = recent.length > 0;
@@ -91,8 +91,8 @@
     els.vocabList.querySelectorAll(".del").forEach((btn) => {
       btn.addEventListener("click", async () => {
         const id = btn.dataset.id;
-        const { savedWords: all = [] } = await chrome.storage.local.get({ savedWords: [] });
-        await chrome.storage.local.set({ savedWords: all.filter((w) => w.id !== id) });
+        const all = await AR.getSavedWords();
+        await AR.saveSavedWords(all.filter((w) => w.id !== id));
         renderVocab();
       });
     });
