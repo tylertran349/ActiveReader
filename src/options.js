@@ -75,6 +75,9 @@
     $("export-json").addEventListener("click", () => exportVocab("json"));
     $("export-csv").addEventListener("click", () => exportVocab("csv"));
     $("clear-vocab").addEventListener("click", clearVocab);
+    $("export-settings").addEventListener("click", exportBackup);
+    $("import-settings").addEventListener("click", () => $("import-file").click());
+    $("import-file").addEventListener("change", onImportFileChosen);
 
     maybeAutofillModel();
     await renderVocab();
@@ -331,7 +334,7 @@
     if (!confirm("Reset all ActiveReader settings to their defaults?\n\nYour Gemini API key is kept.")) return;
     const keepKey = settings.geminiApiKey;
     const defaults = Object.assign({}, AR.DEFAULTS, { geminiApiKey: keepKey });
-    await chrome.storage.sync.set(defaults);
+    await AR.saveSettings(defaults);
     settings = await AR.getSettings();
     location.reload();
   }
@@ -418,15 +421,7 @@
       filename = "activereader-vocabulary.json";
     }
 
-    const blob = new Blob([content], { type: mime + ";charset=utf-8" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    downloadFile(filename, content, mime);
   }
 
   function csvCell(value) {
@@ -441,7 +436,98 @@
     await chrome.storage.local.set({ savedWords: [] });
   }
 
+  /* -------------------------------------------------------- backup/restore */
+
+  /* One file with everything the reader cares about, so it can be restored
+   * after a full profile clean. Contains the Gemini API key in plain text. */
+  async function exportBackup() {
+    const current = await AR.getSettings();
+    const { savedWords = [] } = await chrome.storage.local.get({ savedWords: [] });
+    const payload = {
+      app: "ActiveReader",
+      kind: "backup",
+      version: AR.VERSION,
+      exportedAt: new Date().toISOString(),
+      settings: current,
+      vocabulary: savedWords
+    };
+    downloadFile("activereader-backup.json", JSON.stringify(payload, null, 2), "application/json");
+    setBackupStatus("Backup file downloaded. Keep it somewhere private — it includes your API key.");
+  }
+
+  function onImportFileChosen(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = "";
+    if (file) importBackup(file);
+  }
+
+  async function importBackup(file) {
+    let data;
+    try {
+      data = JSON.parse(await file.text());
+    } catch (err) {
+      setBackupStatus("That file isn't a valid ActiveReader backup.", true);
+      return;
+    }
+
+    // Accept both the wrapped backup file and a bare settings object.
+    let incoming = null;
+    if (data && data.settings && typeof data.settings === "object") incoming = data.settings;
+    else if (data && typeof data === "object" && !Array.isArray(data)) incoming = data;
+
+    const clean = {};
+    Object.keys(AR.DEFAULTS).forEach((key) => {
+      if (incoming && Object.prototype.hasOwnProperty.call(incoming, key)) clean[key] = incoming[key];
+    });
+    if (!Object.keys(clean).length) {
+      setBackupStatus("That file doesn't contain any ActiveReader settings.", true);
+      return;
+    }
+
+    if (
+      !confirm(
+        "Replace your current ActiveReader settings with this backup?\n\nYour saved vocabulary will be merged, not replaced."
+      )
+    ) {
+      return;
+    }
+
+    await AR.saveSettings(clean);
+
+    const vocab = Array.isArray(data && data.vocabulary) ? data.vocabulary : [];
+    if (vocab.length) {
+      const { savedWords = [] } = await chrome.storage.local.get({ savedWords: [] });
+      const byId = new Map();
+      savedWords.concat(vocab).forEach((w) => {
+        if (w && w.id != null) byId.set(String(w.id), w);
+      });
+      await chrome.storage.local.set({ savedWords: Array.from(byId.values()).slice(0, 2000) });
+    }
+
+    setBackupStatus("Restored. Reloading…");
+    setTimeout(() => location.reload(), 700);
+  }
+
+  function setBackupStatus(text, isError) {
+    const el = $("backup-status");
+    if (!el) return;
+    el.textContent = text;
+    el.style.color = isError ? "#ef4444" : "";
+  }
+
   /* -------------------------------------------------------------- helpers */
+
+  function downloadFile(filename, content, mime) {
+    const blob = new Blob([content], { type: (mime || "application/json") + ";charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }
 
   /* Thin alias over the shared helper in config.js. */
   function send(message) {

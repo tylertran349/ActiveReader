@@ -78,10 +78,14 @@
             <select id="target-lang"></select>
           </label>
           <label class="field">
-            <span>Explain &amp; translate into</span>
+            <span>My language</span>
             <select id="base-lang"></select>
           </label>
         </div>
+        <p class="desc">
+          Your own language — used for translations, quiz explanations and the feedback Gemini gives
+          on your answers.
+        </p>
       </section>
 
       <!-- Translation -->
@@ -227,6 +231,23 @@
             </select>
           </label>
         </div>
+      </section>
+
+      <!-- Backup -->
+      <section class="card">
+        <h2>Backup &amp; restore</h2>
+        <p class="desc">
+          ActiveReader keeps a spare copy of your settings inside the browser and restores them
+          automatically if they go missing after a clean. For a full profile clean (for example with
+          PrivaZer), also download a backup file and keep it somewhere safe — it also saves your
+          vocabulary and <b>contains your Gemini API key</b>.
+        </p>
+        <div class="row">
+          <button id="export-settings" class="btn" type="button">Download backup file</button>
+          <button id="import-settings" class="btn" type="button">Restore from backup file</button>
+          <input id="import-file" type="file" accept="application/json,.json" hidden />
+        </div>
+        <p id="backup-status" class="desc"></p>
       </section>
 
       <!-- Vocabulary -->

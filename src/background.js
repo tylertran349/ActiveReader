@@ -16,11 +16,22 @@ let offscreenCloseTimer = null;
 
 chrome.runtime.onInstalled.addListener(async () => {
   const existing = await chrome.storage.sync.get(AR.DEFAULTS);
-  await chrome.storage.sync.set(Object.assign({}, AR.DEFAULTS, existing));
+  await AR.saveSettings(Object.assign({}, AR.DEFAULTS, existing));
   buildContextMenus();
 });
 
 chrome.runtime.onStartup.addListener(buildContextMenus);
+
+/* Mirror settings into the local backup on every change, including ones that
+ * arrive through Chrome Sync from another computer. This is what lets a wiped
+ * sync area be rebuilt. */
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== "sync") return;
+  chrome.storage.sync
+    .get(null)
+    .then((all) => AR.writeLocalBackup(all))
+    .catch(() => {});
+});
 
 function buildContextMenus() {
   chrome.contextMenus.removeAll(() => {
@@ -122,6 +133,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return true;
     case MSG.QUIZ:
       handleQuiz(msg).then(sendResponse);
+      return true;
+    case MSG.GRADE:
+      handleGrade(msg).then(sendResponse);
       return true;
     case MSG.TTS:
       handleTts(msg, sender).then(sendResponse);
@@ -467,22 +481,71 @@ async function handleQuiz(msg) {
     msg.config || {}
   );
 
+  const wantCount = Math.max(1, Math.min(20, Number(cfg.count) || 5));
+
   try {
-    const prompt = buildQuizPrompt(text, cfg, settings);
-    const raw = await callGemini(prompt, settings, QUIZ_SCHEMA, 0.85, 4096);
-    const parsed = parseJsonLoose(raw);
-    let questions = Array.isArray(parsed && parsed.questions) ? parsed.questions : [];
-    questions = questions.map(normalizeQuestion).filter(Boolean).slice(0, cfg.count);
+    const questions = await generateQuestions(text, cfg, settings, wantCount);
     if (!questions.length) {
       throw new Error("The model did not return usable questions. Try again.");
     }
-    return { ok: true, questions };
+    return { ok: true, questions, requested: wantCount };
   } catch (e) {
     return { ok: false, error: e.message };
   }
 }
 
-function buildQuizPrompt(text, cfg, settings) {
+/* Some fast/lite models return fewer questions than asked for, so ask again for
+ * the missing ones and merge the results. Questions are de-duplicated by text
+ * across rounds so a top-up never repeats a question the learner already has. */
+const QUIZ_MAX_ROUNDS = 3;
+
+async function generateQuestions(text, cfg, settings, wantCount) {
+  const collected = [];
+  const seen = new Set();
+
+  for (let round = 0; round < QUIZ_MAX_ROUNDS && collected.length < wantCount; round++) {
+    const need = wantCount - collected.length;
+    const prompt = buildQuizPrompt(text, cfg, settings, need, collected);
+    const raw = await callGemini(prompt, settings, QUIZ_SCHEMA, 0.85, 4096);
+
+    let parsed;
+    try {
+      parsed = parseJsonLoose(raw);
+    } catch (e) {
+      // Keep any questions already gathered; only fail if we have none.
+      if (collected.length) break;
+      throw e;
+    }
+
+    const fresh = (Array.isArray(parsed && parsed.questions) ? parsed.questions : [])
+      .map(normalizeQuestion)
+      .filter(Boolean);
+
+    let added = 0;
+    for (const q of fresh) {
+      const key = questionKey(q);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      collected.push(q);
+      added++;
+      if (collected.length >= wantCount) break;
+    }
+
+    // Nothing new came back — stop rather than burn more calls.
+    if (!added) break;
+  }
+
+  return collected.slice(0, wantCount);
+}
+
+function questionKey(q) {
+  return String(q.question || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function buildQuizPrompt(text, cfg, settings, count, existing) {
   const target = AR.langName(settings.targetLang);
   const base = AR.langName(settings.baseLang);
   const typeLabels = AR.QUIZ_TYPE_LABELS;
@@ -491,7 +554,6 @@ function buildQuizPrompt(text, cfg, settings) {
     .map((t) => typeLabels[t] || t)
     .join(", ");
 
-  const count = Math.max(1, Math.min(20, Number(cfg.count) || 5));
   const difficulty = cfg.difficulty || "intermediate";
 
   let languageRule;
@@ -507,6 +569,7 @@ function buildQuizPrompt(text, cfg, settings) {
     `You are a patient ${target} language tutor creating a reading-comprehension quiz.`,
     `The learner's native language is ${base} and they are learning ${target} at a ${difficulty} level.`,
     `Create exactly ${count} questions using only information found in the TEXT below.`,
+    `The "questions" array MUST contain exactly ${count} complete items — not fewer.`,
     `Use only these question types: ${chosen}.`,
     languageRule,
     `Rules:`,
@@ -517,12 +580,18 @@ function buildQuizPrompt(text, cfg, settings) {
     cfg.explain
       ? `- Always fill "explanation" with one short sentence in ${base} explaining why the answer is correct.`
       : `- You may leave "explanation" empty.`,
-    `- Do not repeat the same fact in multiple questions.`,
-    `- Return JSON only, matching the provided schema.`,
-    ``,
-    `TEXT:`,
-    text
+    `- Do not repeat the same fact in multiple questions.`
   ];
+
+  if (existing && existing.length) {
+    lines.push(
+      ``,
+      `You have already written these ${existing.length} question(s). Do not repeat or reword them, and do not ask about the same fact again:`
+    );
+    existing.forEach((q) => lines.push(`- ${q.question}`));
+  }
+
+  lines.push(``, `Return JSON only, matching the provided schema.`, ``, `TEXT:`, text);
   return lines.join("\n");
 }
 
@@ -567,6 +636,63 @@ function parseJsonLoose(raw) {
     }
   }
   throw new Error("Could not parse the quiz JSON returned by Gemini.");
+}
+
+/* --------------------------------------------------------------- grading */
+
+const GRADE_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    correct: { type: "BOOLEAN" },
+    feedback: { type: "STRING" }
+  },
+  required: ["correct", "feedback"]
+};
+
+/* Grade a free-response answer with Gemini. The model is asked to accept
+ * semantically equivalent answers and to write its feedback in the learner's
+ * own language (baseLang). */
+async function handleGrade(msg) {
+  const settings = await AR.getSettings();
+  const question = String(msg.question || "").trim();
+  const answer = String(msg.answer || "").trim();
+  const userAnswer = String(msg.userAnswer || "").trim();
+
+  if (!question || !answer) return { ok: false, error: "Nothing to grade." };
+  if (!userAnswer) return { ok: false, error: "Type an answer first." };
+
+  const base = AR.langName(settings.baseLang);
+  const target = AR.langName(settings.targetLang);
+  const typeLabel = msg.qType === "blank" ? "fill-in-the-blank" : "short-answer";
+  const passage = String(msg.text || "").trim().slice(0, 4000);
+
+  const lines = [
+    `You are a patient ${target} language tutor grading a learner's ${typeLabel} answer.`,
+    `The learner's native language is ${base} and their level is ${settings.quizDifficulty}.`,
+    ``,
+    `Question: ${question}`,
+    `Expected answer: ${answer}`,
+    passage ? `Passage the question comes from:\n${passage}` : "",
+    `Learner's answer: ${userAnswer}`,
+    ``,
+    `Rules:`,
+    `- Set "correct" to true when the learner's answer shows the right meaning. Accept answers that are semantically equivalent to the expected answer and ignore case, punctuation and small typos.`,
+    `- Be honest but encouraging: a partly correct answer is not correct, but point out what they got right.`,
+    `- Write "feedback" in ${base} using 1-3 short sentences. Explain why the answer is right or wrong, gently correct mistakes and, when helpful, show the correct or a more natural phrasing.`,
+    `- Return JSON only, matching the provided schema.`
+  ].filter(Boolean);
+
+  try {
+    const raw = await callGemini(lines.join("\n"), settings, GRADE_SCHEMA, 0.2, 512);
+    const parsed = parseJsonLoose(raw);
+    return {
+      ok: true,
+      correct: !!parsed.correct,
+      feedback: String(parsed.feedback || "").trim()
+    };
+  } catch (e) {
+    return { ok: false, error: e.message };
+  }
 }
 
 /* ------------------------------------------------------------------ tts */

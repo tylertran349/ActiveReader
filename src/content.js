@@ -34,6 +34,7 @@
   let pendingReposition = false;
   let toastTimer = null;
   let dragState = null;
+  let resizeState = null;
 
   /* Bumped whenever the highlighted text changes, so responses that arrive
    * after the user selected something else are discarded. */
@@ -48,10 +49,26 @@
   const state = {
     translation: { status: "idle", text: "", detected: "", engine: "", error: "" },
     audio: { status: "idle", provider: "" },
-    quiz: { status: "idle", questions: [], error: "", revealed: {}, checked: {}, picked: {}, entered: {}, config: null }
+    quiz: {
+      status: "idle",
+      questions: [],
+      error: "",
+      revealed: {},
+      checked: {},
+      picked: {},
+      entered: {},
+      grading: {},
+      grades: {},
+      translations: {},
+      requested: 0,
+      text: "",
+      config: null
+    }
   };
 
   const MAX_QUIZ_CHARS = 4000;
+  const PANEL_MIN_W = 280;
+  const PANEL_MIN_H = 220;
 
   /* --------------------------------------------------------------- boot */
 
@@ -86,6 +103,7 @@
     .ar-icon{display:inline-block;width:1.15em;height:1.15em;flex:none;vertical-align:-0.19em;fill:currentColor;pointer-events:none}
     .ar-panel{display:none;flex-direction:column;width:384px;max-height:70vh;background:var(--ar-bg);color:var(--ar-fg);border:1px solid var(--ar-border);border-radius:16px;box-shadow:var(--ar-shadow);overflow:hidden;font-size:14px}
     .ar-panel.open{display:flex}
+    .ar-resize{position:absolute;right:0;bottom:0;width:20px;height:20px;cursor:nwse-resize;color:var(--ar-muted);opacity:.65;touch-action:none}
   `;
 
   function mk(tag, className, text) {
@@ -188,6 +206,12 @@
     bodyEl = mk("div", "ar-body");
     panelEl.appendChild(bodyEl);
 
+    /* Corner grip used to resize the panel by dragging. */
+    const resizeHandle = mk("div", "ar-resize");
+    resizeHandle.title = "Drag to resize";
+    resizeHandle.setAttribute("aria-hidden", "true");
+    panelEl.appendChild(resizeHandle);
+
     shadow.appendChild(toolbarEl);
     shadow.appendChild(panelEl);
 
@@ -200,6 +224,7 @@
     shadow.addEventListener("change", onShadowChange);
     shadow.addEventListener("input", onShadowInput);
 
+    applyPanelSize();
     applyTheme();
     (document.documentElement || document.body).appendChild(host);
   }
@@ -226,6 +251,32 @@
     const accent = AR.ACCENTS[settings.panelAccent] || AR.ACCENTS.indigo;
     host.style.setProperty("--ar-accent", accent.a);
     host.style.setProperty("--ar-accent-2", accent.b);
+  }
+
+  /* Apply a saved panel size (from dragging the resize grip), clamped to the
+   * current viewport. A zero means "use the default / fit the content". */
+  function applyPanelSize() {
+    if (!panelEl) return;
+    const maxW = Math.max(PANEL_MIN_W, window.innerWidth - 24);
+    const maxH = Math.max(PANEL_MIN_H, window.innerHeight - 24);
+    const w = Number(settings.panelWidth) || 0;
+    const h = Number(settings.panelHeight) || 0;
+
+    if (w > 0) {
+      panelEl.style.width = Math.round(clamp(w, PANEL_MIN_W, maxW)) + "px";
+      panelEl.style.maxWidth = "none";
+    } else {
+      panelEl.style.width = "";
+      panelEl.style.maxWidth = "";
+    }
+
+    if (h > 0) {
+      panelEl.style.height = Math.round(clamp(h, PANEL_MIN_H, maxH)) + "px";
+      panelEl.style.maxHeight = "none";
+    } else {
+      panelEl.style.height = "";
+      panelEl.style.maxHeight = "";
+    }
   }
 
   /* -------------------------------------------------------- selection */
@@ -311,7 +362,9 @@
     selectionToken++;
     state.translation = { status: "idle", text: "", detected: "", engine: "", error: "" };
     state.audio = { status: "idle", provider: "" };
-    state.quiz = { status: "idle", questions: [], error: "", revealed: {}, checked: {}, picked: {}, entered: {}, config: null };
+    /* The quiz is intentionally kept: highlighting a new phrase (for example
+     * to translate a word) should not throw away a quiz the reader already
+     * generated. It is replaced only when a new quiz is generated. */
     current.text = text;
     current.saved = false;
   }
@@ -394,7 +447,18 @@
     }
 
     if (selEl) {
-      selEl.textContent = current.text + (isTruncated() ? " …" : "");
+      const preview = current.text + (isTruncated() ? " …" : "");
+      if (tab === "translate" && current.text) {
+        setHtml(
+          selEl,
+          `<div class="ar-sel-row"><span class="ar-sel-text">${AR.escapeHtml(preview)}</span>` +
+            `<button class="ar-speak" type="button" data-action="speak-original" title="Listen to the original" aria-label="Listen to the original">${AR.icon(
+              "volume_up"
+            )}</button></div>`
+        );
+      } else {
+        selEl.textContent = preview;
+      }
     }
     if (badgeEl) badgeEl.textContent = AR.langLabel(settings.targetLang);
 
@@ -486,6 +550,11 @@
     } else if (t.status === "done") {
       const rtl = AR.isRtl(settings.baseLang) ? " rtl" : "";
       out = `
+        <div class="ar-trans-actions">
+          <button class="ar-speak" type="button" data-action="speak-translation" title="Listen to the translation" aria-label="Listen to the translation">${AR.icon(
+            "volume_up"
+          )}</button>
+        </div>
         <div class="ar-result${rtl}">${AR.escapeHtml(t.text)}</div>
         <div class="ar-meta">
           ${t.detected ? "Detected: " + AR.escapeHtml(AR.langLabel(t.detected)) + " · " : ""}
@@ -621,7 +690,17 @@
       ? `<div class="ar-hint">Only the first ${MAX_QUIZ_CHARS} characters were sent to Gemini.</div>`
       : "";
 
-    return controls + truncNote + body;
+    const shortNote =
+      hasQuestions && state.quiz.requested && state.quiz.questions.length < state.quiz.requested
+        ? `<div class="ar-hint">Gemini returned ${state.quiz.questions.length} of ${state.quiz.requested} questions. Press <b>New quiz</b> to try for more.</div>`
+        : "";
+
+    const staleNote =
+      hasQuestions && state.quiz.text && state.quiz.text !== quizText()
+        ? `<div class="ar-hint">Showing your last quiz, for a previous selection. Press <b>New quiz</b> to use the current text.</div>`
+        : "";
+
+    return controls + truncNote + shortNote + staleNote + body;
   }
 
   function htmlQuestion(q, i) {
@@ -648,17 +727,22 @@
         `</div>`;
     } else {
       const entered = state.quiz.entered[i] || "";
-      const isCorrect = normalizeAnswer(entered) === normalizeAnswer(q.answer);
+      const grading = !!state.quiz.grading[i];
+      const grade = state.quiz.grades[i];
+      const isCorrect = grade ? !!grade.correct : normalizeAnswer(entered) === normalizeAnswer(q.answer);
+      const feedback = (grade && grade.feedback) || "";
       inner = `
         <input class="ar-answer-input" type="text" data-action="answer-input" data-q="${i}"
           placeholder="${q.type === "blank" ? "Fill in the blank…" : "Type your answer…"}"
-          value="${AR.escapeHtml(entered)}" ${revealed ? "disabled" : ""} />
+          value="${AR.escapeHtml(entered)}" ${revealed || grading ? "disabled" : ""} />
         <div class="ar-actions">
-          ${!revealed ? `<button class="ar-btn primary" data-action="check" data-q="${i}">Check</button>` : ""}
-          ${!revealed ? `<button class="ar-btn" data-action="reveal" data-q="${i}">Show answer</button>` : ""}
+          ${!revealed && !grading ? `<button class="ar-btn primary" data-action="check" data-q="${i}">Check</button>` : ""}
+          ${!revealed && !grading ? `<button class="ar-btn" data-action="reveal" data-q="${i}">Show answer</button>` : ""}
         </div>
         ${
-          revealed
+          grading
+            ? `<div class="ar-loading"><span class="ar-spinner"></span> Checking your answer…</div>`
+            : revealed
             ? checked
               ? `<div class="ar-verdict ${isCorrect ? "ok" : "no"}">${
                   isCorrect
@@ -670,6 +754,7 @@
                 )} Answer: ${AR.escapeHtml(q.answer)}</div>`
             : ""
         }
+        ${feedback ? `<div class="ar-explain">${AR.icon("auto_awesome")} ${AR.escapeHtml(feedback)}</div>` : ""}
       `;
     }
 
@@ -677,6 +762,7 @@
       <div class="ar-qcard">
         <span class="ar-qtype">${AR.QUIZ_TYPE_LABELS[q.type] || q.type}</span>
         <div class="ar-qtext">${i + 1}. ${AR.escapeHtml(q.question)}</div>
+        ${htmlQuestionTranslation(i, q)}
         ${inner}
         ${
           revealed && q.explanation
@@ -685,6 +771,36 @@
         }
       </div>
     `;
+  }
+
+  /* Translate button + result shown under a quiz question. Uses the same
+   * translation engine/cache as the Translate tab, into the learner's own
+   * language (baseLang). */
+  function htmlQuestionTranslation(i, q) {
+    const t = state.quiz.translations[i];
+    const rtl = AR.isRtl(settings.baseLang) ? " rtl" : "";
+
+    let out = "";
+    if (!t || t.status === "error") {
+      out =
+        `<button class="ar-qtrans" data-action="translate-question" data-q="${i}">` +
+        AR.icon("translate") +
+        ` Translate question</button>`;
+    }
+    if (t && t.status === "loading") {
+      out += `<div class="ar-loading"><span class="ar-spinner"></span> Translating…</div>`;
+    }
+    if (t && t.status === "error") {
+      out += `<div class="ar-error">${AR.escapeHtml(t.error)}</div>`;
+    }
+    if (t && t.status === "done") {
+      const translated = String(t.text || "");
+      const same = translated.trim().toLowerCase() === String(q.question || "").trim().toLowerCase();
+      out += same
+        ? `<div class="ar-hint">Already in ${AR.escapeHtml(AR.langLabel(settings.baseLang))}.</div>`
+        : `<div class="ar-qtranslation${rtl}">${AR.escapeHtml(translated)}</div>`;
+    }
+    return out;
   }
 
   function syncQuizControls() {
@@ -775,17 +891,18 @@
     render();
   }
 
-  async function runSpeak() {
-    const text = limitText(current.text);
-    if (!text) return;
+  async function runSpeak(text, lang) {
+    const value = limitText(text == null ? current.text : text);
+    if (!value) return;
+    const useLang = lang || settings.targetLang;
 
     state.audio = { status: "playing", provider: settings.ttsProvider };
-    render();
+    if (tab === "audio") render();
 
     const res = await send({
       type: MSG.TTS,
-      text,
-      lang: settings.targetLang,
+      text: value,
+      lang: useLang,
       provider: settings.ttsProvider
     });
 
@@ -793,6 +910,7 @@
       state.audio = { status: "playing", provider: res.provider || settings.ttsProvider };
     } else {
       state.audio = { status: "error", provider: "" };
+      toast((res && res.error) || "Could not play audio");
     }
     if (tab === "audio") render();
   }
@@ -823,6 +941,8 @@
         state.quiz.status = "done";
         state.quiz.error = "";
         state.quiz.questions = cached;
+        state.quiz.requested = cached.length;
+        state.quiz.text = text;
         render();
         return;
       }
@@ -832,7 +952,6 @@
     resetQuizAnswers();
     state.quiz.status = "loading";
     state.quiz.error = "";
-    state.quiz.questions = [];
     render();
 
     const res = await send({
@@ -847,8 +966,13 @@
       }
     });
 
-    // A newer selection appeared while we were waiting — drop this result.
-    if (token !== selectionToken) return;
+    // The selection changed while we were waiting — drop this result and fall
+    // back to whatever quiz (if any) was already showing.
+    if (token !== selectionToken) {
+      state.quiz.status = state.quiz.questions.length ? "done" : "idle";
+      if (tab === "quiz") render();
+      return;
+    }
 
     if (!res) {
       state.quiz.status = "error";
@@ -856,6 +980,8 @@
     } else if (res.ok) {
       state.quiz.status = "done";
       state.quiz.questions = res.questions || [];
+      state.quiz.requested = res.requested || cfg.count || state.quiz.questions.length;
+      state.quiz.text = text;
       cacheSet(quizCache, key, state.quiz.questions, AR.CACHE.QUIZ_MAX);
     } else {
       state.quiz.status = "error";
@@ -869,6 +995,106 @@
     state.quiz.checked = {};
     state.quiz.picked = {};
     state.quiz.entered = {};
+    state.quiz.grading = {};
+    state.quiz.grades = {};
+    state.quiz.translations = {};
+  }
+
+  /* Free-response answers are graded by Gemini so that equivalent wording and
+   * small typos still count, and so the learner gets feedback in their own
+   * language. If Gemini is unavailable we fall back to a plain string match. */
+  async function gradeAnswer(i, q, userAnswer) {
+    state.quiz.grading[i] = true;
+    render();
+
+    const token = selectionToken;
+    const res = await send({
+      type: MSG.GRADE,
+      question: q.question,
+      answer: q.answer,
+      userAnswer,
+      qType: q.type,
+      text: quizText()
+    });
+
+    // A newer selection appeared while we were waiting — drop this result but
+    // clear the "checking" flag so the question is not stuck spinning.
+    if (token !== selectionToken) {
+      delete state.quiz.grading[i];
+      if (tab === "quiz") render();
+      return;
+    }
+
+    delete state.quiz.grading[i];
+    state.quiz.revealed[i] = true;
+    state.quiz.checked[i] = true;
+
+    if (res && res.ok) {
+      state.quiz.grades[i] = { correct: !!res.correct, feedback: res.feedback || "" };
+    } else {
+      state.quiz.grades[i] = {
+        correct: normalizeAnswer(userAnswer) === normalizeAnswer(q.answer),
+        feedback: ""
+      };
+      toast((res && res.error) || "Could not reach Gemini — checked automatically");
+    }
+    render();
+  }
+
+  /* Translate a single quiz question into the learner's own language. Shares
+   * the translation cache with the Translate tab so repeats are instant. */
+  async function translateQuestion(i) {
+    const q = state.quiz.questions[i];
+    if (!q) return;
+    const existing = state.quiz.translations[i];
+    if (existing && existing.status === "loading") return;
+
+    const text = String(q.question || "").trim();
+    if (!text) return;
+
+    const key = translateKey(text);
+    const cached = translateCache.get(key);
+    if (cached) {
+      state.quiz.translations[i] = { status: "done", text: cached.translation, error: "" };
+      render();
+      return;
+    }
+
+    const token = selectionToken;
+    state.quiz.translations[i] = { status: "loading", text: "", error: "" };
+    render();
+
+    const res = await send({
+      type: MSG.TRANSLATE,
+      text,
+      baseLang: settings.baseLang,
+      engine: settings.translationEngine
+    });
+
+    // A newer selection appeared while we were waiting — drop this result but
+    // clear the "translating" flag so the button comes back.
+    if (token !== selectionToken) {
+      delete state.quiz.translations[i];
+      if (tab === "quiz") render();
+      return;
+    }
+
+    if (res && res.ok) {
+      state.quiz.translations[i] = { status: "done", text: res.translation, error: "" };
+      cacheSet(
+        translateCache,
+        key,
+        { translation: res.translation, detected: res.detected || "", engine: res.engine || "" },
+        AR.CACHE.TRANSLATION_MAX
+      );
+    } else {
+      state.quiz.translations[i] = {
+        status: "error",
+        text: "",
+        error: (res && res.error) || "Translation failed."
+      };
+    }
+    render();
   }
 
   async function saveCurrent(withToast) {
@@ -983,6 +1209,12 @@
       case "play":
         openSpeak();
         break;
+      case "speak-original":
+        runSpeak(current.text, settings.targetLang);
+        break;
+      case "speak-translation":
+        if (state.translation.status === "done") runSpeak(state.translation.text, settings.baseLang);
+        break;
       case "stop":
         stopSpeak();
         break;
@@ -1013,9 +1245,15 @@
           toast("Type an answer first");
           break;
         }
-        state.quiz.revealed[i] = true;
-        state.quiz.checked[i] = true;
-        render();
+        const q = state.quiz.questions[i];
+        if (!q) break;
+        if (q.type === "mcq") {
+          state.quiz.revealed[i] = true;
+          state.quiz.checked[i] = true;
+          render();
+          break;
+        }
+        gradeAnswer(i, q, entered);
         break;
       }
       case "reveal": {
@@ -1024,12 +1262,21 @@
         render();
         break;
       }
+      case "translate-question": {
+        const i = Number(el.dataset.q);
+        translateQuestion(i);
+        break;
+      }
       default:
         break;
     }
   }
 
   function onShadowMouseDown(e) {
+    if (e.target.closest(".ar-resize")) {
+      beginResize(e);
+      return;
+    }
     if (e.target.closest(".ar-toolbar, .ar-head, .ar-tabs, .ar-tab")) {
       e.preventDefault();
     }
@@ -1086,6 +1333,53 @@
     window.removeEventListener("mouseup", endDrag, true);
   }
 
+  /* --------------------------------------------------------------- resize */
+
+  function beginResize(e) {
+    if (!panelEl) return;
+    const r = panelEl.getBoundingClientRect();
+    resizeState = {
+      x: e.clientX,
+      y: e.clientY,
+      w: r.width,
+      h: r.height,
+      left: r.left,
+      top: r.top
+    };
+    /* Pin the current size, then lift the CSS caps so the panel can grow
+     * beyond its defaults. Pinning first avoids a jump on a bare click. */
+    panelEl.style.width = Math.round(r.width) + "px";
+    panelEl.style.height = Math.round(r.height) + "px";
+    panelEl.style.maxWidth = "none";
+    panelEl.style.maxHeight = "none";
+    e.preventDefault();
+    e.stopPropagation();
+    window.addEventListener("mousemove", onResizeMove, true);
+    window.addEventListener("mouseup", endResize, true);
+  }
+
+  function onResizeMove(e) {
+    if (!resizeState || !panelEl) return;
+    const maxW = Math.max(PANEL_MIN_W, window.innerWidth - resizeState.left - 8);
+    const maxH = Math.max(PANEL_MIN_H, window.innerHeight - resizeState.top - 8);
+    const w = clamp(resizeState.w + (e.clientX - resizeState.x), PANEL_MIN_W, maxW);
+    const h = clamp(resizeState.h + (e.clientY - resizeState.y), PANEL_MIN_H, maxH);
+    panelEl.style.width = Math.round(w) + "px";
+    panelEl.style.height = Math.round(h) + "px";
+  }
+
+  function endResize() {
+    if (resizeState && panelEl) {
+      AR.saveSettings({
+        panelWidth: Math.round(panelEl.offsetWidth),
+        panelHeight: Math.round(panelEl.offsetHeight)
+      }).catch(() => {});
+    }
+    resizeState = null;
+    window.removeEventListener("mousemove", onResizeMove, true);
+    window.removeEventListener("mouseup", endResize, true);
+  }
+
   function onRuntimeMessage(msg, _sender, sendResponse) {
     if (!msg || !msg.type) return undefined;
 
@@ -1129,6 +1423,7 @@
     AR.getSettings().then((next) => {
       settings = next;
       applyTheme();
+      applyPanelSize();
       if (isDisabledSite()) {
         hideToolbar();
         closePanel();

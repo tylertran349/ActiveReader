@@ -14,10 +14,11 @@ dependencies.
 | | |
 |---|---|
 | 🔊 **Text to speech** | Uses the Google Translate voice by default (natural, no API key). Falls back to the built-in browser voice if Google is unreachable. Long selections are split into chunks automatically. |
-| 🌐 **Translation** | Translates the highlighted text into your target language via Google Translate, with an optional Gemini engine. Reports the detected source language. |
-| 🎓 **AI quizzes** | Gemini generates multiple-choice, short-answer and fill-in-the-blank questions from the selection. Answer them inline, get instant feedback, and read a short explanation. |
+| 🌐 **Translation** | Translates the highlighted text into your own language via Google Translate, with an optional Gemini engine, and reports the detected source language. Small speaker buttons play the original or the translation aloud. |
+| 🎓 **AI quizzes** | Gemini generates multiple-choice, short-answer and fill-in-the-blank questions from the selection. Answer them inline and get instant feedback: free-response answers are graded by Gemini (equivalent wording and small typos count) with a short explanation written in your own language. A **Translate question** button under each question shows it in your own language. Your last quiz stays put when you highlight new text or switch tabs, and if the model returns fewer questions than you asked for, ActiveReader automatically asks again to fill the quiz. |
 | ⭐ **Vocabulary** | Save words/phrases with their translation and source page. Search, export (JSON/CSV) and manage them in settings. |
 | ⚙️ **Persistent settings** | API key, languages, voice, quiz defaults, theme and more are stored in Chrome sync storage. |
+| 🛡️ **Backups that survive a clean** | Settings are also mirrored locally and restored automatically if they are wiped, and **Download backup file** in settings saves everything (plus vocabulary) so you can restore it after a system cleaner empties the browser profile. |
 | 🖱️ **Right-click menu** | Translate / listen / quiz / save straight from the context menu after selecting text. |
 
 Everything reacts to **whatever text you have selected** — drag-selected,
@@ -59,7 +60,8 @@ only quizzes (and optional Gemini translation) need one.
 2. A small menu appears next to the selection with **Translate**, **Listen**,
    **Quiz**, **Save** and **Close**.
 3. Results open in the panel. Switch between the **Translate**, **Audio** and
-   **Quiz** tabs, drag the panel by its header, and press `Esc` to close.
+   **Quiz** tabs, drag the panel by its header to move it, drag the bottom-right
+   corner to resize it, and press `Esc` to close. The panel remembers its size.
 
 You can also right-click a selection and pick an ActiveReader action.
 
@@ -70,12 +72,13 @@ You can also right-click a selection and pick an ActiveReader action.
 Open settings from the panel's ⚙ button, the popup, or `chrome://extensions`.
 
 - **Gemini AI** — API key, **model** (a free-text field — type any model ID, or click *Fetch models* to load the live list your key can access), connection test.
-- **Languages** — the language you are learning and the language explanations/translations are shown in.
+- **Languages** — the language you are learning and your own language, used for translations, quiz explanations and Gemini's answer feedback.
 - **Translation** — Google Translate or Gemini (automatic fallback to the other).
 - **Text to speech** — Google Translate voice or browser voice, plus speed, pitch and a preview box.
 - **Reading & selection** — floating toolbar on/off, auto-translate, auto-save lookups, minimum/maximum selection size, and a per-site block list.
 - **Quiz defaults** — which question types to generate, difficulty, number of questions, question language and whether to include explanations.
 - **Appearance** — light/dark/system theme and an accent colour.
+- **Backup & restore** — download a backup file (settings + vocabulary) and restore it later. Handy after a system cleaner empties the browser profile.
 - **Saved vocabulary** — search, delete, export and clear your saved words.
 
 Changes save automatically.
@@ -113,6 +116,8 @@ Translate MP3s and plays them, keeping playback reliable regardless of the page.
 - The API key never touches the page — all requests are made from the extension's
   service worker.
 - Saved vocabulary lives in `chrome.storage.local` on your machine.
+- The optional backup file you download is a plain JSON file that **includes your
+  API key**, so keep it somewhere private.
 
 ---
 

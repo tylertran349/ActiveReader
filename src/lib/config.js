@@ -21,7 +21,7 @@
 
     // Languages
     targetLang: "es", // the language being learned
-    baseLang: "en", // the language explanations/translations are shown in
+    baseLang: "en", // the learner's own language: explanations, translations & feedback
 
     // Text to speech
     ttsProvider: "google", // "google" | "browser"
@@ -48,6 +48,8 @@
     // Appearance / misc
     theme: "auto", // auto | light | dark
     panelAccent: "indigo", // indigo | emerald | rose | amber | violet
+    panelWidth: 0, // 0 = use the default panel width
+    panelHeight: 0, // 0 = fit the content
     autoSaveLookups: false
   };
 
@@ -142,19 +144,87 @@
     return l ? l.locale : code;
   };
 
-  /* --------------------------------------------------------------- settings */
+  /* --------------------------------------------------- settings & backup */
 
-  AR.getSettings = async function () {
+  /* Your settings live in chrome.storage.sync. Browser- and system-level
+   * cleaners (Brave's "clear browsing data", PrivaZer, etc.) are not supposed
+   * to touch extension storage, but aggressive cleans can still wipe it. To
+   * make that recoverable we keep a spare copy in chrome.storage.local on every
+   * save, and put it back if sync storage ever comes back empty. */
+  AR.BACKUP_KEY = "settingsBackup";
+
+  /* Keep only the known settings keys so the backup never grows junk. */
+  function pickSettings(source) {
+    const out = {};
+    Object.keys(AR.DEFAULTS).forEach(function (key) {
+      if (source && Object.prototype.hasOwnProperty.call(source, key)) out[key] = source[key];
+    });
+    return out;
+  }
+
+  AR.writeLocalBackup = async function (settings) {
+    const clean = pickSettings(settings);
     try {
-      const stored = await chrome.storage.sync.get(AR.DEFAULTS);
-      return Object.assign({}, AR.DEFAULTS, stored);
+      /* Merge with any previous mirror rather than replacing it, so a partial
+       * or gradual wipe can never shrink the backup we are trying to keep. */
+      const store = await chrome.storage.local.get(AR.BACKUP_KEY);
+      const prev = (store[AR.BACKUP_KEY] && store[AR.BACKUP_KEY].settings) || {};
+      const merged = Object.assign({}, prev, clean);
+      if (!Object.keys(merged).length) return;
+      await chrome.storage.local.set({ [AR.BACKUP_KEY]: { ts: Date.now(), settings: merged } });
     } catch (e) {
-      return Object.assign({}, AR.DEFAULTS);
+      /* best effort */
     }
   };
 
+  AR.readLocalBackup = async function () {
+    try {
+      const store = await chrome.storage.local.get(AR.BACKUP_KEY);
+      const entry = store[AR.BACKUP_KEY];
+      if (entry && entry.settings && Object.keys(entry.settings).length) return entry;
+    } catch (e) {
+      /* ignore */
+    }
+    return null;
+  };
+
+  /* Once per context is enough; a wiped sync area stays wiped for the session. */
+  let restoreTried = false;
+
+  AR.getSettings = async function () {
+    let stored;
+    try {
+      stored = await chrome.storage.sync.get(null);
+    } catch (e) {
+      return Object.assign({}, AR.DEFAULTS);
+    }
+    stored = stored || {};
+
+    // Sync storage is completely empty — either a brand-new install or a wipe.
+    // If we have a local mirror, restore it so the user keeps their setup.
+    if (!restoreTried && Object.keys(stored).length === 0) {
+      restoreTried = true;
+      const backup = await AR.readLocalBackup();
+      if (backup) {
+        try {
+          await chrome.storage.sync.set(backup.settings);
+        } catch (e) {
+          /* restore is best effort; still return the recovered values */
+        }
+        return Object.assign({}, AR.DEFAULTS, backup.settings);
+      }
+    }
+
+    return Object.assign({}, AR.DEFAULTS, stored);
+  };
+
   AR.saveSettings = async function (patch) {
-    return chrome.storage.sync.set(patch);
+    await chrome.storage.sync.set(patch);
+    try {
+      await AR.writeLocalBackup(await chrome.storage.sync.get(null));
+    } catch (e) {
+      /* best effort */
+    }
   };
 
   AR.escapeHtml = function (str) {
@@ -262,6 +332,7 @@
     COMMAND: "ar-command",
     TRANSLATE: "ar-translate",
     QUIZ: "ar-quiz",
+    GRADE: "ar-grade",
     TTS: "ar-tts",
     TTS_STOP: "ar-tts-stop",
     TTS_STATE: "ar-tts-state",

@@ -151,6 +151,37 @@
   display: flex;
 }
 
+/* Corner grip: drag to resize the panel. */
+.ar-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 20px;
+  height: 20px;
+  cursor: nwse-resize;
+  color: var(--ar-muted);
+  opacity: 0.65;
+  touch-action: none;
+  z-index: 2;
+}
+
+.ar-resize::before {
+  content: "";
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 10px;
+  height: 10px;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  border-bottom-right-radius: 4px;
+}
+
+.ar-resize:hover {
+  opacity: 1;
+  color: var(--ar-accent);
+}
+
 .ar-head {
   display: flex;
   align-items: center;
@@ -258,6 +289,44 @@
   word-break: break-word;
 }
 
+.ar-sel-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.ar-sel-text {
+  flex: 1;
+  min-width: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Small speaker button used to play the original / translated sentence. */
+.ar-speak {
+  all: unset;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 7px;
+  color: var(--ar-muted);
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.ar-speak:hover {
+  background: var(--ar-field);
+  color: var(--ar-accent);
+}
+
+.ar-speak:focus-visible {
+  outline: 2px solid var(--ar-accent);
+  outline-offset: 2px;
+}
+
 .ar-body {
   flex: 1;
   padding: 12px;
@@ -335,6 +404,16 @@
   white-space: pre-wrap;
   word-break: break-word;
   min-height: 54px;
+}
+
+.ar-trans-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.ar-trans-actions + .ar-result {
+  margin-top: 4px;
 }
 
 .ar-result.rtl {
@@ -553,6 +632,53 @@
   color: var(--ar-fg);
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* Per-question translate control + translated question text. */
+.ar-qtrans {
+  all: unset;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--ar-border);
+  background: var(--ar-bg);
+  color: var(--ar-muted);
+  font-size: 11.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.ar-qtrans:hover {
+  color: var(--ar-accent);
+  border-color: var(--ar-accent);
+  background: var(--ar-bg-2);
+}
+
+.ar-qtrans:focus-visible {
+  outline: 2px solid var(--ar-accent);
+  outline-offset: 2px;
+}
+
+.ar-qtranslation {
+  margin-top: 8px;
+  padding: 8px 11px;
+  border-radius: 9px;
+  border-left: 3px solid var(--ar-accent);
+  background: var(--ar-bg);
+  color: var(--ar-fg);
+  font-size: 13.5px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.ar-qtranslation.rtl {
+  direction: rtl;
+  text-align: right;
 }
 
 .ar-verdict {
