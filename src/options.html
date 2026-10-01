@@ -162,7 +162,20 @@
         </div>
 
         <label class="field">
-          <span>Disabled sites (one hostname per line)</span>
+          <span>Where ActiveReader runs</span>
+          <select id="site-access">
+            <option value="all">Every site, except the ones I block</option>
+            <option value="selected">Only the sites I allow below</option>
+          </select>
+        </label>
+
+        <label class="field" id="enabled-sites-field" hidden>
+          <span>Allowed sites (one hostname per line)</span>
+          <textarea id="enabled-sites" rows="3" spellcheck="false" placeholder="example.com&#10;news.site.org"></textarea>
+        </label>
+
+        <label class="field">
+          <span>Blocked sites (one hostname per line)</span>
           <textarea id="disabled-sites" rows="3" spellcheck="false" placeholder="example.com&#10;news.site.org"></textarea>
         </label>
       </section>

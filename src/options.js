@@ -62,10 +62,24 @@
       });
     });
 
-    // Disabled sites
+    // Site access: allow-list vs block-list, plus the two hostname lists.
+    const access = $("site-access");
+    access.value = settings.siteAccess;
+    access.addEventListener("change", () => {
+      settings.siteAccess = access.value;
+      queueSave({ siteAccess: access.value });
+      syncSiteAccess();
+    });
+
+    const enabled = $("enabled-sites");
+    enabled.value = (settings.enabledSites || []).join("\n");
+    enabled.addEventListener("change", () => queueSave({ enabledSites: parseSites(enabled.value) }));
+
     const sites = $("disabled-sites");
     sites.value = (settings.disabledSites || []).join("\n");
     sites.addEventListener("change", () => queueSave({ disabledSites: parseSites(sites.value) }));
+
+    syncSiteAccess();
 
     // Buttons
     $("toggle-key").addEventListener("click", toggleKey);
@@ -150,6 +164,12 @@
 
   function parseSites(value) {
     return AR.parseSiteList(value);
+  }
+
+  /* The allowed-sites field is only relevant in "selected" mode. */
+  function syncSiteAccess() {
+    const field = $("enabled-sites-field");
+    if (field) field.hidden = settings.siteAccess !== "selected";
   }
 
   /* --------------------------------------------------------------- saving */

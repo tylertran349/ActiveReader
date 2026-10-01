@@ -174,7 +174,7 @@
     head.appendChild(brand);
     head.appendChild(mk("div", "ar-head-spacer"));
     [
-      ["disable-site", "block", "Disable ActiveReader on this site"],
+      ["disable-site", "block", "Turn ActiveReader off on this site"],
       ["settings", "settings", "Open settings"],
       ["close", "close", "Close"]
     ].forEach(([action, icon, title]) => {
@@ -295,13 +295,13 @@
       current.text = info.text;
       current.rect = info.rect;
 
-      if (settings.showToolbar && !isDisabledSite()) showToolbar();
+      if (settings.showToolbar && isActiveSite()) showToolbar();
       else hideToolbar();
 
       // Auto-translate reacts to a new selection. Re-selecting the same text
       // while the panel is already open is a no-op, so we do not re-render or
       // re-request anything. If the panel is closed, reopen it.
-      if (settings.autoTranslate && !isDisabledSite()) {
+      if (settings.autoTranslate && isActiveSite()) {
         const panelOpen = panelEl && panelEl.classList.contains("open");
         if (changed || !panelOpen) {
           if (!panelOpen || tab === "translate") openTranslate();
@@ -362,13 +362,8 @@
     return t === host || (t && t.getRootNode && t.getRootNode() === shadow);
   }
 
-  function isDisabledSite() {
-    const hostname = (location.hostname || "").toLowerCase();
-    if (!hostname) return false;
-    return (settings.disabledSites || []).some((site) => {
-      const s = String(site || "").trim().toLowerCase();
-      return s && (hostname === s || hostname.endsWith("." + s));
-    });
+  function isActiveSite() {
+    return AR.isSiteActive(settings, location.hostname);
   }
 
   function resetForText(text) {
@@ -1138,15 +1133,20 @@
   }
 
   async function disableSite() {
-    const hostname = location.hostname || "";
+    const hostname = (location.hostname || "").toLowerCase();
     if (!hostname) return;
+
+    /* Add the exact host to the block list. This works in both modes because
+     * the block list always wins, and it is precise: on an allowed domain's
+     * subdomain it disables only that subdomain. (Removing the allow entry
+     * instead would be ambiguous, since an entry also matches its subdomains.) */
     const list = (settings.disabledSites || []).slice();
     if (list.indexOf(hostname) === -1) list.push(hostname);
     settings.disabledSites = list;
     await AR.saveSettings({ disabledSites: list });
     hideToolbar();
     closePanel();
-    toast("ActiveReader disabled on this site");
+    toast("ActiveReader turned off on this site");
   }
 
   function copyTranslation() {
@@ -1418,6 +1418,7 @@
 
   async function handleCommand(msg) {
     settings = await AR.getSettings();
+    if (!isActiveSite()) return;
 
     const info = getSelectionInfo();
     const text = String(msg.text || "").trim() || (info ? info.text : "");
@@ -1445,7 +1446,7 @@
         state.quiz.config = null;
       }
       if (badgeEl) badgeEl.textContent = AR.langLabel(settings.targetLang);
-      if (isDisabledSite()) {
+      if (!isActiveSite()) {
         hideToolbar();
         closePanel();
       }

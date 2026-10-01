@@ -76,7 +76,7 @@ Open settings from the panel's ⚙ button, the popup, or `chrome://extensions`.
 - **Languages** — the language you are learning and your own language, used for translations, quiz explanations and Gemini's answer feedback.
 - **Translation** — Google Translate or Gemini (automatic fallback to the other).
 - **Text to speech** — Google Translate voice or browser voice, plus speed, pitch and a preview box.
-- **Reading & selection** — floating toolbar on/off, auto-translate, auto-save lookups, minimum/maximum selection size, and a per-site block list.
+- **Reading & selection** — floating toolbar on/off, auto-translate, auto-save lookups, minimum/maximum selection size, and where the extension runs: on **every site except the ones you block**, or **only on the sites you allow** (per-site allow and block lists).
 - **Quiz defaults** — which question types to generate, difficulty, number of questions, question language and whether to include explanations.
 - **Appearance** — light/dark/system theme and an accent colour.
 - **Updates** — current version, a **Check for updates** button, an automatic 12-hour check, an optional notification, and a page that walks through downloading the latest build.
@@ -192,7 +192,7 @@ Translate MP3s and plays them, keeping playback reliable regardless of the page.
 
 | Problem | Fix |
 |---|---|
-| Toolbar doesn't appear | Reload the page, and check the site isn't in your disabled-sites list. |
+| Toolbar doesn't appear | Reload the page, and check the site is allowed by your site-access settings (not blocked, and listed if you chose "Only the sites I allow"). |
 | No audio | Some voices need a user gesture — click Play. Try switching to the **Browser voice** in settings. |
 | Quiz fails | Check the API key with **Test connection** and confirm the model name is available to your key. |
 | "Could not reach the extension" | The extension was reloaded; refresh the page. |

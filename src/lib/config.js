@@ -144,7 +144,11 @@
     autoTranslate: false,
     minSelectionLength: 2,
     maxSelectionLength: 2000,
+    // Where ActiveReader runs. "all" reacts on every site except disabledSites;
+    // "selected" reacts only on the hostnames listed in enabledSites.
+    siteAccess: "all",
     disabledSites: [],
+    enabledSites: [],
 
     // Translation
     translationEngine: "google", // "google" | "gemini"
@@ -295,6 +299,42 @@
     return out;
   };
 
+  /* Whether a hostname matches any entry in a site list. A list entry matches
+   * the hostname exactly and any subdomain of it, so "example.com" also covers
+   * "news.example.com". */
+  AR.siteMatches = function (hostname, sites) {
+    const host = String(hostname || "").trim().toLowerCase();
+    if (!host) return false;
+    return (sites || []).some(function (site) {
+      const s = String(site || "").trim().toLowerCase();
+      return s && (host === s || host.endsWith("." + s));
+    });
+  };
+
+  /* Pull a bare hostname out of a URL. Used by the service worker, where
+   * `location` is the worker's own context rather than the page being read. */
+  AR.hostFromUrl = function (url) {
+    try {
+      return new URL(url).hostname.toLowerCase();
+    } catch (e) {
+      return "";
+    }
+  };
+
+  /* Whether ActiveReader should react on a page, honouring both site modes:
+   * "all" (everywhere except the block list) and "selected" (only the allowed
+   * list). The block list always wins, so a site can be both allowed and
+   * blocked. A page without a hostname (file://, about:blank, sandboxed frames)
+   * is active in "all" mode — there is nothing to block — but never matches the
+   * "selected" allow list. */
+  AR.isSiteActive = function (settings, hostname) {
+    const s = settings || AR.DEFAULTS;
+    const host = String(hostname || "").trim().toLowerCase();
+    if (AR.siteMatches(host, s.disabledSites)) return false;
+    if (s.siteAccess === "selected") return AR.siteMatches(host, s.enabledSites);
+    return true;
+  };
+
   /* Coerce an arbitrary object into a fully-formed, correctly-typed settings
    * object. Storage and imported backup files can contain anything, so every
    * value is validated and clamped here; callers can then trust the shape. */
@@ -329,6 +369,8 @@
       minSelectionLength: num(r.minSelectionLength, d.minSelectionLength, 1, 100),
       maxSelectionLength: num(r.maxSelectionLength, d.maxSelectionLength, 200, 20000),
       disabledSites: AR.parseSiteList(r.disabledSites == null ? d.disabledSites : r.disabledSites),
+      siteAccess: oneOf(r.siteAccess, ["all", "selected"], d.siteAccess),
+      enabledSites: AR.parseSiteList(r.enabledSites == null ? d.enabledSites : r.enabledSites),
       translationEngine: oneOf(r.translationEngine, ["google", "gemini"], d.translationEngine),
       quizTypes: Array.isArray(r.quizTypes)
         ? r.quizTypes.filter((t) => AR.QUIZ_TYPES.indexOf(t) !== -1)

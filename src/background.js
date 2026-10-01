@@ -82,6 +82,13 @@ chrome.contextMenus.onClicked.addListener(async (info, tab) => {
   const command = MENU_COMMANDS[info.menuItemId];
   if (!command) return;
 
+  // Respect the site-access settings: never act on a page the reader has not
+  // enabled ActiveReader for. When the host cannot be determined, fall through
+  // and let the content script's own guard decide.
+  const settings = await AR.getSettings();
+  const host = AR.hostFromUrl(info.pageUrl || tab.url || "");
+  if (host && !AR.isSiteActive(settings, host)) return;
+
   const ok = await ensureContentScript(tab.id);
   if (!ok) return;
 

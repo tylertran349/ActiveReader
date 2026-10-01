@@ -126,6 +126,49 @@ test("parseSiteList strips schemes, paths, ports, wildcards and duplicates", () 
   assert.deepStrictEqual(AR.parseSiteList("a.com\nb.com, a.com"), ["a.com", "b.com"]);
 });
 
+test("site access defaults to all sites with empty lists", () => {
+  const s = AR.normalizeSettings({});
+  assert.strictEqual(s.siteAccess, "all");
+  assert.deepStrictEqual(s.enabledSites, []);
+  assert.deepStrictEqual(s.disabledSites, []);
+  assert.strictEqual(AR.normalizeSettings({ siteAccess: "hack" }).siteAccess, "all");
+});
+
+test("isSiteActive honours the block list and the allow-list mode", () => {
+  const all = AR.normalizeSettings({ disabledSites: ["blocked.com"] });
+  assert.strictEqual(AR.isSiteActive(all, "example.com"), true);
+  assert.strictEqual(AR.isSiteActive(all, "blocked.com"), false);
+  assert.strictEqual(AR.isSiteActive(all, "news.blocked.com"), false);
+  // A page with no hostname (file://, about:blank) stays active in "all" mode.
+  assert.strictEqual(AR.isSiteActive(all, ""), true);
+
+  const selected = AR.normalizeSettings({
+    siteAccess: "selected",
+    enabledSites: ["*.Example.com", "https://learn.es/path"]
+  });
+  assert.strictEqual(selected.siteAccess, "selected");
+  assert.strictEqual(AR.isSiteActive(selected, "example.com"), true);
+  assert.strictEqual(AR.isSiteActive(selected, "news.example.com"), true);
+  assert.strictEqual(AR.isSiteActive(selected, "learn.es"), true);
+  assert.strictEqual(AR.isSiteActive(selected, "other.com"), false);
+  assert.strictEqual(AR.isSiteActive(selected, ""), false);
+
+  // The block list still wins over the allow list.
+  const both = AR.normalizeSettings({
+    siteAccess: "selected",
+    enabledSites: ["example.com"],
+    disabledSites: ["news.example.com"]
+  });
+  assert.strictEqual(AR.isSiteActive(both, "example.com"), true);
+  assert.strictEqual(AR.isSiteActive(both, "news.example.com"), false);
+});
+
+test("hostFromUrl extracts a hostname and survives garbage", () => {
+  assert.strictEqual(AR.hostFromUrl("https://News.Example.com/path?q=1"), "news.example.com");
+  assert.strictEqual(AR.hostFromUrl("not a url"), "");
+  assert.strictEqual(AR.hostFromUrl(""), "");
+});
+
 test("normalizePatch touches only the supplied keys", () => {
   const patch = AR.normalizePatch({ autoTranslate: true, maxSelectionLength: 9, unknown: 1 });
   assert.deepStrictEqual(Object.keys(patch).sort(), ["autoTranslate", "maxSelectionLength"]);
