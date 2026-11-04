@@ -233,7 +233,7 @@ Translate MP3s and plays them, keeping playback reliable regardless of the page.
 | Toolbar doesn't appear | Reload the page, and check the site is allowed by your site-access settings (not blocked, and listed if you chose "Only the sites I allow"). |
 | No audio | Some voices need a user gesture — click Play. Try switching to the **Browser voice** in settings. |
 | Quiz fails | Check the API key with **Test connection** and confirm the model name is available to your key. |
-| Word popup doesn't appear | The feature is off by default — enable **Show a definition when I click a single word** in settings; the popup also skips links, buttons and form fields on purpose. |
+| Word popup doesn't appear | The feature is off by default - enable **Show a definition when I click a single word twice** in settings; the popup also skips links, buttons and form fields on purpose. Double-click exactly one word, and refresh any tab that was open when the extension was reloaded. |
 | Word popup says "Fallback lookup" | The preferred engine failed, so the other one answered. Check **Test connection** in settings when the AI engine is selected. |
 | "Could not reach the extension" | The extension was reloaded; refresh the page. |
 | Translation empty | Try switching the translation engine; both engines fall back to each other automatically. |

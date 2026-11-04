@@ -43,7 +43,7 @@
   let defineTarget = null; // { word, x, y } the popup is anchored to
   /* The word from the previous click. Definitions open on the second click
    * on the same word, so a stray click while reading does not pop anything up. */
-  let pendingWordClick = null; // { node, word, offset }
+  let pendingWordClick = null; // { node, word, start }
   /* Small per-page cache so re-clicking a word does not re-hit the network. */
   const defineCache = new Map();
 
@@ -1334,9 +1334,15 @@
     }
   }
 
+  /* Scripts that do not put spaces between words, so a plain "letters run"
+   * scan cannot find a word boundary on its own. */
+  const WIDE_SCRIPT_RE =
+    /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Thai}\p{Script=Lao}\p{Script=Khmer}\p{Script=Myanmar}]/u;
+
   /* Whole word around a character offset: letters/digits/accents, plus "'"
-   * and "-" glued to letters ("don't", "mother-in-law"). */
-  function wordAroundOffset(text, offset) {
+   * and "-" glued to letters ("don't", "mother-in-law"). Returns both the
+   * word and its start index so callers can measure it exactly. */
+  function wordSpanAroundOffset(text, offset) {
     const isWordChar = (ch) => /[\p{L}\p{N}'’-]/u.test(ch);
     let start = Math.min(offset, Math.max(0, text.length - 1));
     let end = start;
@@ -1344,11 +1350,59 @@
     while (end < text.length && isWordChar(text[end])) end++;
     if (start === end) return null;
 
-    let word = text.slice(start, end);
+    const raw = text.slice(start, end);
     /* Interior apostrophes/hyphens stay; leading/trailing ones are cut. */
-    word = word.replace(/^['’-]+|['’-]+$/g, "");
+    const word = raw.replace(/^['’-]+|['’-]+$/g, "");
     if (!word || !/\p{L}/u.test(word)) return null;
+    /* Keep `start` on the first character of the trimmed word. */
+    start += raw.indexOf(word);
+    return { word, start };
+  }
+
+  /* Word span for a click. For wide scripts, ask ICU (Intl.Segmenter) where
+   * the word really begins and ends; otherwise a Japanese/Chinese/Thai
+   * sentence would be treated as one enormous "word". */
+  function wordSpanAt(text, offset) {
+    const span = wordSpanAroundOffset(text, offset);
+    if (!span || !WIDE_SCRIPT_RE.test(span.word)) return span;
+    try {
+      if (typeof Intl !== "undefined" && Intl.Segmenter) {
+        const segmenter = new Intl.Segmenter(settings.targetLang || undefined, { granularity: "word" });
+        for (const part of segmenter.segment(text)) {
+          if (part.isWordLike && offset >= part.index && offset < part.index + part.segment.length) {
+            return { word: part.segment, start: part.index };
+          }
+        }
+      }
+    } catch (e) {
+      /* fall back to the letter run */
+    }
+    return span;
+  }
+
+  /* The word the browser itself selected, trimmed of surrounding punctuation.
+   * Returns "" when the selection is a phrase (triple-click) or empty. */
+  function selectedWordText(selected) {
+    const text = String(selected || "").trim();
+    const word = text.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, "");
+    const chars = Array.from(word).length;
+    if (chars < 2 || chars > 40) return "";
+    if (!/\p{L}/u.test(word) || /\s/u.test(word)) return "";
     return word;
+  }
+
+  /* On-screen rect of the browser's current selection, if there is one. */
+  function selectionRect(sel) {
+    try {
+      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+      const r = sel.getRangeAt(0).getBoundingClientRect();
+      if (r && (r.width || r.height)) {
+        return { top: r.top, left: r.left, right: r.right, bottom: r.bottom, width: r.width, height: r.height };
+      }
+    } catch (e) {
+      /* ignore */
+    }
+    return null;
   }
 
   function onWordClick(e) {
@@ -1366,14 +1420,38 @@
     }
 
     const text = hit.node.textContent || "";
-    const word = wordAroundOffset(text, hit.offset);
-    if (!word || word.length < 2 || word.length > 40) {
+    const span = wordSpanAt(text, hit.offset);
+    if (!span || Array.from(span.word).length < 2 || Array.from(span.word).length > 40) {
       pendingWordClick = null;
       hideDefine();
       return;
     }
 
-    const rect = wordRectAt(hit.node, hit.offset, word);
+    const sel = window.getSelection ? window.getSelection() : null;
+    const selected = sel ? String(sel || "").trim() : "";
+    const selectedWord = selectedWordText(selected);
+
+    /* A native double-click has already selected exactly one word. Trust the
+     * browser's boundary: it handles scripts without spaces (Chinese,
+     * Japanese, Thai) and matches the text the reader sees highlighted.
+     * Widen to a hyphen/apostrophe compound for spaced scripts, where the
+     * browser stops at the hyphen ("mother" in "mother-in-law"). */
+    if (e.detail > 1 && selectedWord) {
+      let word = selectedWord;
+      let start = span.start;
+      if (!WIDE_SCRIPT_RE.test(span.word) && span.word.toLowerCase().indexOf(word.toLowerCase()) !== -1) {
+        word = span.word;
+        start = span.start;
+      }
+      const rect = selectionRect(sel) || wordRectAt(hit.node, start, word);
+      if (rect) {
+        pendingWordClick = null;
+        showDefine(word, rect, contextAroundWord(text, start, word));
+        return;
+      }
+    }
+
+    const rect = wordRectAt(hit.node, span.start, span.word);
     if (!rect) {
       pendingWordClick = null;
       hideDefine();
@@ -1384,10 +1462,9 @@
      * that leaves real selected text behind as a word click. A native
      * double-click selects just the clicked word (possibly with trailing
      * punctuation), which is allowed here so it can open the popup. */
-    const selected = window.getSelection ? String(window.getSelection() || "").trim() : "";
     const selectedIsWord =
       selected.length <= 1 ||
-      (selected.toLowerCase().includes(word.toLowerCase()) && selected.length <= word.length + 3);
+      (selected.toLowerCase().includes(span.word.toLowerCase()) && selected.length <= span.word.length + 3);
     if (!selectedIsWord) {
       pendingWordClick = null;
       hideDefine();
@@ -1397,21 +1474,18 @@
     const pending = pendingWordClick;
     pendingWordClick = null;
     const sameWord =
-      pending &&
-      pending.node === hit.node &&
-      pending.word === word &&
-      Math.abs(pending.offset - hit.offset) <= word.length + 2;
+      pending && pending.node === hit.node && pending.word === span.word && pending.start === span.start;
 
     if (!sameWord) {
       /* First click: remember the word but keep the popup closed. */
-      pendingWordClick = { node: hit.node, word, offset: hit.offset };
+      pendingWordClick = { node: hit.node, word: span.word, start: span.start };
       hideDefine();
       return;
     }
 
     /* The event still reaches the page untouched — the popup only *adds*
      * something to look at; a click on a word keeps its normal behaviour. */
-    showDefine(word, rect, contextAroundWord(text, hit.offset, word));
+    showDefine(span.word, rect, contextAroundWord(text, span.start, span.word));
   }
 
   function showDefine(word, rect, context) {
@@ -1524,12 +1598,14 @@
   /* The on-screen rectangle of one word inside a text node, measured with
    * per-character ranges. A word wrapped over two lines has two rects; the
    * last one is the side the reader clicked, so it wins. */
-  function wordRectAt(node, offset, word) {
+  function wordRectAt(node, start, word) {
     try {
-      const start = Math.max(0, offset - word.length + 1);
+      const textLength = (node.textContent || "").length;
+      const from = Math.max(0, start);
+      const to = Math.min(textLength, from + word.length);
       const range = document.createRange();
       let best = null;
-      for (let i = start; i < start + word.length; i++) {
+      for (let i = from; i < to; i++) {
         range.setStart(node, i);
         range.setEnd(node, i + 1);
         const rect = range.getBoundingClientRect();
@@ -1543,8 +1619,7 @@
 
   /* A short window of the surrounding sentence, so a model can pick the right
    * sense of the word ("bank" by a river vs. a "bank" with tellers). */
-  function contextAroundWord(text, offset, word) {
-    const start = Math.max(0, offset - word.length + 1);
+  function contextAroundWord(text, start, word) {
     const from = Math.max(0, start - 80);
     const to = Math.min(text.length, start + word.length + 80);
     return text
