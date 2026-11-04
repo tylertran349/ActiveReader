@@ -108,6 +108,21 @@ test("an intentionally empty quiz type list is preserved", () => {
   assert.deepStrictEqual(AR.normalizeSettings({ quizTypes: [] }).quizTypes, []);
 });
 
+test("language options are sorted alphabetically by label", () => {
+  const labels = AR.LANGUAGES.map((l) => l.label);
+  assert.deepStrictEqual(labels, [...labels].sort((a, b) => a.localeCompare(b, "en")));
+  assert.strictEqual(labels[0], "Afrikaans");
+  assert.strictEqual(labels[labels.length - 1], "Vietnamese");
+  // The rendered dropdown options follow the same order and keep the selection.
+  const html = AR.languageOptionsHtml("es");
+  const order = [...html.matchAll(/<option value="([^"]+)"([^>]*)>([^<]+)</g)];
+  assert.deepStrictEqual(
+    order.map((m) => m[3]),
+    labels
+  );
+  assert.ok(order.some((m) => m[1] === "es" && m[2].includes("selected")));
+});
+
 test("non-numeric values fall back to defaults instead of 0", () => {
   const s = AR.normalizeSettings({ ttsRate: null, ttsPitch: true, quizCount: [], panelWidth: "" });
   assert.strictEqual(s.ttsRate, 1); // default, not the 0.5 minimum
