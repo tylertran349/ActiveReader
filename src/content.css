@@ -323,6 +323,23 @@
   border-bottom-color: var(--ar-accent);
 }
 
+.ar-sel-label {
+  margin: 10px 12px 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ar-muted);
+}
+
+.ar-sel-label[hidden] {
+  display: none;
+}
+
+.ar-sel-label:not([hidden]) + .ar-sel {
+  margin-top: 4px;
+}
+
 .ar-sel {
   margin: 10px 12px 0;
   padding: 8px 10px;

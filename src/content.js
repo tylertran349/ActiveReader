@@ -26,6 +26,7 @@
   let toolbarEl = null;
   let panelEl = null;
   let bodyEl = null;
+  let selLabelEl = null;
   let selEl = null;
   let badgeEl = null;
   let toastEl = null;
@@ -234,6 +235,9 @@
       tabs.appendChild(btn);
     });
     panelEl.appendChild(tabs);
+
+    selLabelEl = mk("div", "ar-sel-label", "Selected text");
+    panelEl.appendChild(selLabelEl);
 
     selEl = mk("div", "ar-sel");
     panelEl.appendChild(selEl);
@@ -494,6 +498,8 @@
         saveBtn.textContent = current.saved ? "Saved" : "Save";
       }
     }
+
+    if (selLabelEl) selLabelEl.hidden = !current.text;
 
     if (selEl) {
       const preview = current.text + (isTruncated() ? " …" : "");
