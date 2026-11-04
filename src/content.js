@@ -782,6 +782,7 @@
       const feedback = (grade && grade.feedback) || "";
       inner = `
         <input class="ar-answer-input" type="text" data-action="answer-input" data-q="${i}"
+          spellcheck="false" autocorrect="off" autocapitalize="off"
           placeholder="${q.type === "blank" ? "Fill in the blank…" : "Type your answer…"}"
           value="${AR.escapeHtml(entered)}" ${revealed || grading ? "disabled" : ""} />
         <div class="ar-actions">
