@@ -1384,7 +1384,7 @@
     renderDefineLoading(word);
     positionDefine();
 
-    const key = settings.baseLang + "\u0000" + word.toLowerCase();
+    const key = [settings.translationEngine, settings.baseLang, word.toLowerCase()].join("\u0000");
     const cached = defineCache.get(key);
     if (cached) {
       renderDefine(word, cached);
@@ -1392,7 +1392,7 @@
       return;
     }
 
-    send({ type: MSG.DEFINE, word, context }).then((res) => {
+    send({ type: MSG.DEFINE, word, context, engine: settings.translationEngine }).then((res) => {
       /* The reader clicked another word (or Esc) while we were waiting. */
       if (token !== defineToken) return;
       if (res && res.ok) {
@@ -1428,9 +1428,10 @@
     );
   }
 
-  function defineHeadHtml(word) {
+  function defineHeadHtml(word, posHtml) {
     return (
       `<div class="ar-define-head"><span class="ar-define-word">${AR.escapeHtml(word)}</span>` +
+      (posHtml || "") +
       `<span class="ar-define-close" data-action="define-close" title="Dismiss" role="button" tabindex="0">${AR.icon(
         "close"
       )}</span></div>`
@@ -1440,16 +1441,20 @@
   function renderDefine(word, entry) {
     const rtl = AR.isRtl(settings.baseLang) ? " rtl" : "";
     const pos = entry.partOfSpeech ? `<span class="ar-define-pos">${AR.escapeHtml(entry.partOfSpeech)}</span>` : "";
-    const meaning = entry.meaning
-      ? AR.escapeHtml(entry.meaning)
-      : "No definition found.";
+    const meaning = entry.meaning ? AR.escapeHtml(entry.meaning) : "No definition found.";
     const example = entry.example
       ? `<div class="ar-define-example${rtl}">“${AR.escapeHtml(entry.example)}”</div>`
       : "";
     const note = entry.fallback
-      ? `<div class="ar-define-note">Translation only — add an AI API key for richer definitions.</div>`
+      ? `<div class="ar-define-note">Fallback lookup — switch the translation engine to AI in settings for richer definitions.</div>`
       : "";
-    setHtml(defineEl, defineHeadHtml(word) + `<div class="ar-define-meaning${rtl}">${meaning}</div>` + example + note);
+    setHtml(
+      defineEl,
+      defineHeadHtml(word, pos) +
+        `<div class="ar-define-meaning${rtl}">${meaning}</div>` +
+        example +
+        note
+    );
   }
 
   function renderDefineError(word, error) {

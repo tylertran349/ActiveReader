@@ -160,7 +160,9 @@
 
     // Languages
     // Whether clicking a word shows a small popup with its definition.
-    clickDefine: true,
+    // Off by default: the popup changes how every page reacts to clicks, so
+    // the reader opts in from Settings → Reading & selection.
+    clickDefine: false,
     // The language the clicked word is looked up in. Shared with the
     // Translate and Audio features, so the two cannot drift apart.
     targetLang: "es", // the language being learned

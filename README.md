@@ -16,7 +16,7 @@ dependencies.
 | 🔊 **Text to speech** | Uses the Google Translate voice by default (natural, no API key). Falls back to the built-in browser voice if Google is unreachable. Long selections are split into chunks automatically. |
 | 🌐 **Translation** | Translates the highlighted text into your own language via Google Translate, with an optional AI engine, and reports the detected source language. Small speaker buttons play the original or the translation aloud. |
 | 🎓 **AI quizzes** | Your chosen AI model generates multiple-choice, short-answer and fill-in-the-blank questions from the selection. Answer them inline and get instant feedback: free-response answers are graded by the model (equivalent wording and small typos count) with a short explanation written in your own language. A **Translate question** button under each question shows it in your own language. Your last quiz stays put when you highlight new text or switch tabs, and if the model returns fewer questions than you asked for, ActiveReader automatically asks again to fill the quiz. |
-| 🖱️ **Click-a-word** | Click **any single word** while reading and a small popup appears right above it with a one-sentence definition written for that word *in context* (so a "bank" by a river is not a "bank" with tellers), plus part of speech, a tiny example, and a speak button. Works with an AI key; without one it falls back to a plain translation. On/off via **Settings → Reading & selection → Show a definition when I click a single word**. |
+| 🖱️ **Click-a-word** | Optionally, click **any single word** while reading and a small popup appears right above it with a quick lookup of that word. Uses Google Translate by default (no key, no API cost); switch the translation engine to AI in settings for a richer, context-aware definition with part of speech and a tiny example. Off by default — turn it on via **Settings → Reading & selection → Show a definition when I click a single word**. |
 | ⭐ **Vocabulary** | Save words/phrases with their translation and source page. Search, export (JSON/CSV) and manage them in settings. |
 | ⬆️ **Update checks** | ActiveReader notices when its own version changes and, optionally, checks this GitHub project for a newer build every 12 hours. When one exists you get a toolbar badge, an optional notification, an in-popup banner — and an **Update now** button in settings that fetches the newest files from this repo and installs them in place. |
 | ⚙️ **Persistent settings** | API key, languages, voice, quiz defaults, theme and more are stored in Chrome sync storage. |
@@ -84,9 +84,10 @@ API is included by default.
 3. Results open in the panel. Switch between the **Translate**, **Audio** and
    **Quiz** tabs, drag the panel by its header to move it, drag any edge or
    corner to resize it, and press `Esc` to close. The panel remembers its size.
-4. **Click any single word** to see a short definition of it *in context* in a
-   small popup above the word. Click elsewhere or press `Esc` to dismiss it;
-   lookups are cached per page, so re-clicking a word is instant.
+4. **Optionally, click any single word** to see a quick lookup of it in a
+   small popup above the word. This is off by default; enable it in settings.
+   Click elsewhere or press `Esc` to dismiss it; lookups are cached per page,
+   so re-clicking a word is instant.
 
 You can also right-click a selection and pick an ActiveReader action.
 
@@ -232,7 +233,7 @@ Translate MP3s and plays them, keeping playback reliable regardless of the page.
 | Toolbar doesn't appear | Reload the page, and check the site is allowed by your site-access settings (not blocked, and listed if you chose "Only the sites I allow"). |
 | No audio | Some voices need a user gesture — click Play. Try switching to the **Browser voice** in settings. |
 | Quiz fails | Check the API key with **Test connection** and confirm the model name is available to your key. |
-| Word popup says "Translation only" | The AI key was unavailable, so a plain translation was shown. Check **Test connection** in settings — with a key the popup gives full definitions. |
-| Word popup doesn't appear | Make sure **Show a definition when I click a single word** is on in settings; the popup skips links, buttons and form fields on purpose. |
+| Word popup doesn't appear | The feature is off by default — enable **Show a definition when I click a single word** in settings; the popup also skips links, buttons and form fields on purpose. |
+| Word popup says "Fallback lookup" | The preferred engine failed, so the other one answered. Check **Test connection** in settings when the AI engine is selected. |
 | "Could not reach the extension" | The extension was reloaded; refresh the page. |
 | Translation empty | Try switching the translation engine; both engines fall back to each other automatically. |

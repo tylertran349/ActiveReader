@@ -56,7 +56,7 @@ test("defaults are valid and independent of the shared template", () => {
   const s = AR.normalizeSettings({});
   assert.strictEqual(s.targetLang, "es");
   assert.strictEqual(s.baseLang, "en");
-  assert.strictEqual(s.clickDefine, true);
+  assert.strictEqual(s.clickDefine, false);
   assert.deepStrictEqual(s.quizTypes, ["mcq", "short", "blank"]);
   s.disabledSites.push("mutated");
   s.quizTypes.push("mutated");
@@ -93,7 +93,8 @@ test("garbage values are coerced and clamped", () => {
   assert.strictEqual(s.ttsRate, 2);
   assert.strictEqual(s.ttsPitch, 0);
   assert.strictEqual(s.showToolbar, true);
-  assert.strictEqual(s.clickDefine, true);
+  // Non-boolean values fall back to the default, which is now false.
+  assert.strictEqual(s.clickDefine, false);
   assert.strictEqual(s.minSelectionLength, 1);
   assert.strictEqual(s.maxSelectionLength, 200);
   assert.strictEqual(s.translationEngine, "google");
