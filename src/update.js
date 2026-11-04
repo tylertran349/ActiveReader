@@ -17,6 +17,16 @@
     $("link-releases").href = AR.UPDATE.releasesUrl;
     $("link-commits").href = AR.UPDATE.commitsUrl;
 
+    // In-place updater: fetches the repository's files and writes them into the
+    // folder the extension is loaded from (File System Access API).
+    AR.updater.mount({
+      update: "update-now",
+      choose: "choose-update-folder",
+      forget: "forget-update-folder",
+      folder: "update-folder",
+      progress: "update-progress"
+    });
+
     settings = await AR.getSettings();
     $("auto-check").checked = !!settings.autoCheckUpdates;
     $("notify-updates").checked = !!settings.notifyUpdates;
@@ -108,7 +118,11 @@
     }
 
     $("status-line").textContent = status.checkedAt ? "Last checked " + timeAgo(status.checkedAt) + "." : "";
-    $("get-latest").classList.toggle("primary", AR.hasUpdate(status));
+    // Highlight the in-place update when one is available; fall back to the
+    // zip download when this browser cannot write to the extension folder.
+    const inPlaceReady = AR.updater && $("update-now") && !$("update-now").disabled;
+    $("update-now").classList.toggle("primary", AR.hasUpdate(status) && inPlaceReady);
+    $("get-latest").classList.toggle("primary", AR.hasUpdate(status) && !inPlaceReady);
   }
 
   async function getLatest() {

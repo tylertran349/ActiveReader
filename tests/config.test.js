@@ -258,6 +258,40 @@ test("hasUpdate recomputes availability instead of trusting the stored flag", ()
   assert.strictEqual(AR.hasUpdate(null), false);
 });
 
+test("update URLs point at the ActiveReader GitHub repository", () => {
+  assert.strictEqual(AR.UPDATE.OWNER, "tylertran349");
+  assert.strictEqual(AR.UPDATE.REPO, "ActiveReader");
+  assert.strictEqual(AR.UPDATE.repoUrl, "https://github.com/tylertran349/ActiveReader");
+  assert.strictEqual(
+    AR.UPDATE.manifestUrl,
+    "https://raw.githubusercontent.com/tylertran349/ActiveReader/main/manifest.json"
+  );
+  assert.strictEqual(
+    AR.UPDATE.treeUrl,
+    "https://api.github.com/repos/tylertran349/ActiveReader/git/trees/main?recursive=1"
+  );
+  assert.ok(AR.UPDATE.rawBase.startsWith("https://raw.githubusercontent.com/tylertran349/ActiveReader/main/"));
+});
+
+test("isSafeRepoPath blocks traversal, absolute and empty paths", () => {
+  assert.strictEqual(AR.isSafeRepoPath("manifest.json"), true);
+  assert.strictEqual(AR.isSafeRepoPath("src/content.js"), true);
+  assert.strictEqual(AR.isSafeRepoPath("icons/icon16.png"), true);
+  assert.strictEqual(AR.isSafeRepoPath("src/lib/config.js"), true);
+
+  assert.strictEqual(AR.isSafeRepoPath("../outside.js"), false);
+  assert.strictEqual(AR.isSafeRepoPath("a/../../b"), false);
+  assert.strictEqual(AR.isSafeRepoPath("src/./config.js"), false);
+  assert.strictEqual(AR.isSafeRepoPath("src//config.js"), false);
+  assert.strictEqual(AR.isSafeRepoPath("src/"), false);
+  assert.strictEqual(AR.isSafeRepoPath("/absolute"), false);
+  assert.strictEqual(AR.isSafeRepoPath("."), false);
+  assert.strictEqual(AR.isSafeRepoPath(""), false);
+  assert.strictEqual(AR.isSafeRepoPath(null), false);
+  // Backslashes are treated as separators, so they cannot hide a traversal.
+  assert.strictEqual(AR.isSafeRepoPath("a\\..\\config.js"), false);
+});
+
 test("custom provider settings normalize with a safe base URL", () => {
   const s = AR.normalizeSettings({
     llmProvider: "custom",

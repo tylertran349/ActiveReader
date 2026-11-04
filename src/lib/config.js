@@ -15,7 +15,7 @@
     try {
       return chrome.runtime.getManifest().version;
     } catch (e) {
-      return "1.2.0";
+      return "1.3.0";
     }
   })();
 
@@ -54,6 +54,12 @@
     "/" +
     UPDATE_BRANCH +
     "/manifest.json";
+  /* Used by the in-place updater (lib/updater.js): the full file list of the
+   * branch, and the root every raw file is downloaded from. */
+  AR.UPDATE.rawBase =
+    "https://raw.githubusercontent.com/" + UPDATE_OWNER + "/" + UPDATE_REPO + "/" + UPDATE_BRANCH + "/";
+  AR.UPDATE.treeUrl =
+    "https://api.github.com/repos/" + UPDATE_OWNER + "/" + UPDATE_REPO + "/git/trees/" + UPDATE_BRANCH + "?recursive=1";
 
   /* Versions are dotted integers, optionally prefixed with "v" and suffixed with
    * a prerelease tag. Parsing is deliberately loose because the value can come
@@ -93,6 +99,16 @@
 
   AR.isNewerVersion = function (candidate, current) {
     return AR.compareVersions(candidate, current) > 0;
+  };
+
+  /* Guard for paths that arrive from the GitHub file list before anything is
+   * written to disk. Only plain relative paths with no traversal segments are
+   * accepted, so a tampered listing can never escape the folder the user
+   * linked. Backslashes are treated as separators (GitHub never sends them). */
+  AR.isSafeRepoPath = function (value) {
+    const path = String(value == null ? "" : value).replace(/\\/g, "/");
+    if (!path || path.startsWith("/")) return false;
+    return path.split("/").every((part) => part && part !== "." && part !== "..");
   };
 
   /* Whether a stored check result points at a newer build than the one running.

@@ -141,6 +141,16 @@
     $("check-updates").addEventListener("click", checkUpdates);
     $("open-update-page").addEventListener("click", () => send({ type: AR.MSG.OPEN_UPDATE_PAGE }));
 
+    // In-place updater: fetches the repository's files and writes them into the
+    // folder the extension is loaded from (File System Access API).
+    AR.updater.mount({
+      update: "update-now",
+      choose: "choose-update-folder",
+      forget: "forget-update-folder",
+      folder: "update-folder",
+      progress: "update-progress"
+    });
+
     maybeAutofillModel();
     refreshCustomThinkingFromCache();
     await renderUpdateStatus();

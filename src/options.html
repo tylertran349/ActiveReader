@@ -324,9 +324,10 @@
       <section class="card">
         <h2>Updates</h2>
         <p class="desc">
-          ActiveReader checks this GitHub project for a newer version. Chrome cannot install a newer
-          copy of an unpacked extension by itself, so when an update is found you get a one-click
-          download and instructions. Only the version number is read — no personal data is sent.
+          ActiveReader checks this GitHub project for a newer version. <b>Update now</b> goes one step
+          further: it fetches the extension's files from the repository and writes them straight into
+          the folder you loaded the extension from, then reloads it. The first time, Chrome asks you to
+          pick that folder and grant write access. Only GitHub is contacted — no personal data is sent.
         </p>
 
         <div class="update-line">
@@ -336,9 +337,15 @@
 
         <div class="row">
           <button id="check-updates" class="btn" type="button">Check for updates</button>
-          <button id="open-update-page" class="btn" type="button">Update ActiveReader</button>
+          <button id="update-now" class="btn primary" type="button">Update now</button>
+          <button id="choose-update-folder" class="btn" type="button">Choose extension folder…</button>
+          <button id="forget-update-folder" class="btn" type="button" hidden>Forget folder</button>
+          <button id="open-update-page" class="btn" type="button">Update instructions</button>
           <a id="update-repo-link" class="btn" target="_blank" rel="noopener">GitHub repo</a>
         </div>
+
+        <p id="update-folder" class="desc"></p>
+        <p id="update-progress" class="desc"></p>
 
         <label class="switch">
           <input id="auto-check-updates" type="checkbox" />
@@ -386,6 +393,7 @@
     </main>
 
     <script src="lib/config.js"></script>
+    <script src="lib/updater.js"></script>
     <script src="options.js"></script>
   </body>
 </html>

@@ -42,9 +42,17 @@
         </div>
 
         <div class="row">
+          <button id="update-now" class="btn" type="button">Update now</button>
           <button id="check-now" class="btn" type="button">Check again</button>
-          <button id="get-latest" class="btn primary" type="button">Download latest version</button>
+          <button id="get-latest" class="btn" type="button">Download .zip</button>
           <button id="open-extensions" class="btn" type="button">Open chrome://extensions</button>
+        </div>
+
+        <p id="update-folder" class="desc"></p>
+        <p id="update-progress" class="desc"></p>
+        <div class="row">
+          <button id="choose-update-folder" class="btn" type="button">Choose extension folder…</button>
+          <button id="forget-update-folder" class="btn" type="button" hidden>Forget folder</button>
         </div>
 
         <p id="status-line" class="desc"></p>
@@ -53,8 +61,10 @@
       <section class="card">
         <h2>How to update</h2>
         <p class="desc">
-          ActiveReader is installed as an unpacked folder, so Chrome cannot replace it
-          automatically. Updating takes about a minute:
+          <b>Update now</b> fetches every file from this GitHub repository and writes it into the folder
+          above, then reloads ActiveReader by itself. The first time, Chrome asks you to pick the folder
+          the extension is loaded from (the one containing <code>manifest.json</code>) and to allow
+          writes to it. The manual steps below are the fallback:
         </p>
         <ol class="steps">
           <li><b>Download</b> the latest <code>.zip</code> and unzip it.</li>
@@ -82,14 +92,17 @@
           <span>Show a notification when an update is available</span>
         </label>
         <p class="desc">
-          ActiveReader reads only the <code>version</code> field from this project's
-          <code>manifest.json</code> on GitHub. No personal data is sent, and you can turn
-          checking off at any time.
+          Checking reads only the <code>version</code> field of this project's
+          <code>manifest.json</code> on GitHub. Pressing <b>Update now</b> additionally downloads the
+          repository's files (via <code>api.github.com</code> and
+          <code>raw.githubusercontent.com</code>) and writes them into the folder you linked. No
+          personal data is sent, and you can turn checking off at any time.
         </p>
       </section>
     </main>
 
     <script src="lib/config.js"></script>
+    <script src="lib/updater.js"></script>
     <script src="update.js"></script>
   </body>
 </html>

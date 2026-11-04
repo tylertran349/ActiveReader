@@ -153,6 +153,17 @@ body {
   border-color: rgba(239, 68, 68, 0.4);
 }
 
+.btn.primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  border-color: transparent;
+  color: #fff;
+}
+
+.btn.primary:hover {
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  filter: brightness(1.06);
+}
+
 .btn.danger:hover {
   background: rgba(239, 68, 68, 0.1);
 }

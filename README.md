@@ -18,7 +18,7 @@ dependencies.
 | 🎓 **AI quizzes** | Your chosen AI model generates multiple-choice, short-answer and fill-in-the-blank questions from the selection. Answer them inline and get instant feedback: free-response answers are graded by the model (equivalent wording and small typos count) with a short explanation written in your own language. A **Translate question** button under each question shows it in your own language. Your last quiz stays put when you highlight new text or switch tabs, and if the model returns fewer questions than you asked for, ActiveReader automatically asks again to fill the quiz. |
 | 🖱️ **Click-a-word** | Click **any single word** while reading and a small popup appears right above it with a one-sentence definition written for that word *in context* (so a "bank" by a river is not a "bank" with tellers), plus part of speech, a tiny example, and a speak button. Works with an AI key; without one it falls back to a plain translation. On/off via **Settings → Reading & selection → Show a definition when I click a single word**. |
 | ⭐ **Vocabulary** | Save words/phrases with their translation and source page. Search, export (JSON/CSV) and manage them in settings. |
-| ⬆️ **Update checks** | ActiveReader notices when its own version changes and, optionally, checks this GitHub project for a newer build every 12 hours. When one exists you get a toolbar badge, an optional notification, an in-popup banner and a one-click update page. |
+| ⬆️ **Update checks** | ActiveReader notices when its own version changes and, optionally, checks this GitHub project for a newer build every 12 hours. When one exists you get a toolbar badge, an optional notification, an in-popup banner — and an **Update now** button in settings that fetches the newest files from this repo and installs them in place. |
 | ⚙️ **Persistent settings** | API key, languages, voice, quiz defaults, theme and more are stored in Chrome sync storage. |
 | 🛡️ **Backups that survive a clean** | Settings are also mirrored locally and restored automatically if they are wiped, and **Download backup file** in settings saves everything (plus vocabulary) so you can restore it after a system cleaner empties the browser profile. |
 | 🖱️ **Right-click menu** | Translate / listen / quiz / save straight from the context menu after selecting text. |
@@ -103,7 +103,7 @@ Open settings from the panel's ⚙ button, the popup, or `chrome://extensions`.
 - **Reading & selection** — floating toolbar on/off, auto-translate, click-a-word definitions, auto-save lookups, minimum/maximum selection size, and where the extension runs: on **every site except the ones you block**, or **only on the sites you allow** (per-site allow and block lists).
 - **Quiz defaults** — which question types to generate, difficulty, number of questions, question language and whether to include explanations.
 - **Appearance** — light/dark/system theme and an accent colour.
-- **Updates** — current version, a **Check for updates** button, an automatic 12-hour check, an optional notification, and a page that walks through downloading the latest build.
+- **Updates** — current version, a **Check for updates** button, an automatic 12-hour check, an optional notification, and **Update now**, which downloads the latest files from this repo into your extension folder and reloads the extension.
 - **Backup & restore** — download a backup file (settings + vocabulary) and restore it later. Handy after a system cleaner empties the browser profile.
 - **Saved vocabulary** — search, delete, export and clear your saved words.
 
@@ -126,26 +126,37 @@ own version and (optionally) this GitHub repository:
 - **Auto-check** runs on startup and every 12 hours while the setting is on. Turn it
   off in **Settings → Updates** (or on the update page).
 
-### What one click can and cannot do
+### What Update now can and cannot do
 
-Chrome extensions are sandboxed and cannot overwrite their own files, so a loaded
-unpacked extension **cannot install its own update**. Clicking **Download latest
-version** grabs the newest `.zip`, and the update page then tells you to unzip it
-and press **Reload** in `chrome://extensions`. Your settings, API key and
-vocabulary live in Chrome storage, not in the folder, so they survive the update.
+Chrome extensions are sandboxed and cannot overwrite their own files without permission. **Update
+now** (in **Settings → Updates**, and on the update page) works around that with the File System
+Access API:
 
-> **True automatic updates** are only possible when the extension is installed from
-> a `.crx` with an `update_url` (the Chrome Web Store, or a self-hosted update
-> manifest signed with the same key). If this project is ever published that way,
-> Chrome updates it silently and the built-in checker is simply a no-op. See
+1. The first time, Chrome asks you to **pick the folder** the extension is loaded from (the one
+   containing `manifest.json`) and to **allow writes** to it. ActiveReader keeps only that folder
+   permission, in its own storage.
+2. Every later update lists the files in this repo's `main` branch, downloads each one from
+   `raw.githubusercontent.com`, writes them into that folder (with `manifest.json` last), and
+   **reloads the extension by itself**. Your settings, API key and vocabulary live in Chrome
+   storage, not in the folder, so they survive untouched.
+3. If your browser has no folder access API, or you skip the folder step, the update page falls
+   back to **Download .zip**: grab the newest archive, unzip it over the old folder and press
+   **Reload** in `chrome://extensions`.
+
+> Fully silent updates (no folder permission at all) are only possible when the extension is
+> installed from a signed `.crx` with an `update_url` (the Chrome Web Store, or a self-hosted
+> update manifest). If this project is ever published that way, Chrome updates it automatically
+> and the built-in checker becomes a simple "new version available" notice. See
 > [Chrome's update documentation](https://developer.chrome.com/docs/extensions/how-to/distribute/host-on-linux)
 > to self-host a signed build.
 
 ### Privacy of update checks
 
-The check fetches one file — `manifest.json` from this GitHub repository — and
-reads only its `version` field. It sends no identifiers and no personal data, and
-it never touches the pages you read. Turn it off with **Check for updates
+The check fetches one file - `manifest.json` from this GitHub repository - and
+reads only its `version` field. Pressing **Update now** additionally lists the repository's files
+via `api.github.com` and downloads them from `raw.githubusercontent.com` (that is what it writes
+into your extension folder). Neither request sends identifiers or personal data, and neither
+touches the pages you read. Turn the automatic check off with **Check for updates
 automatically**.
 
 ---
@@ -163,8 +174,9 @@ src/
   offscreen.html/.js     plays Google Translate TTS audio in an extension context
   popup.html/.js/.css    toolbar popup (quick settings + recent vocabulary)
   options.html/.js/.css  full settings page
-  update.html/.js/.css   "update available" page + download/instructions
+  update.html/.js/.css   "update available" page + in-place update / download / instructions
   lib/config.js          shared defaults, languages, version helpers, storage helpers
+  lib/updater.js         in-place updater: fetches the repo's files and writes them into the extension folder
 ```
 
 ### Running the tests
