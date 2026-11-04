@@ -124,11 +124,23 @@
   /* ---------------------------------------------------------------- defaults */
 
   AR.DEFAULTS = {
+    // Which LLM backend generates quizzes, grades answers and (optionally)
+    // translates: Google Gemini, or any OpenAI-compatible custom API.
+    llmProvider: "gemini", // "gemini" | "custom"
+
     // Gemini
     geminiApiKey: "",
     // Empty by default: the model ID is free text, and the options page can pick
     // one automatically from the live API list (no hardcoded model catalog).
     geminiModel: "",
+
+    // Custom OpenAI-compatible API. Both the base URL and model stay blank
+    // until the user enters their provider's endpoint and model ID.
+    customApiBaseUrl: "",
+    customApiKey: "",
+    customApiModel: "",
+    // "" means "use the model's own default thinking level", if it has one.
+    customThinkingLevel: "",
 
     // Languages
     targetLang: "es", // the language being learned
@@ -182,6 +194,137 @@
     rose: { a: "#f43f5e", b: "#fb7185" },
     amber: { a: "#f59e0b", b: "#f97316" },
     violet: { a: "#8b5cf6", b: "#d946ef" }
+  };
+
+  /* ------------------------------------------------- custom API + thinking */
+
+  /* Command Code's /provider/v1/models rows do not carry capability metadata,
+   * so the documented thinking-effort ladders for its DeepSeek models live
+   * here. Other providers can return `thinking_levels` / `reasoning_efforts`
+   * fields on their model rows, which AR.getThinkingLevelsFromModel reads
+   * before falling back to this table. `default` is the level the provider
+   * itself uses when none is requested. */
+  AR.THINKING_LEVELS = {
+    "deepseek/deepseek-v4.1-flash": { levels: ["low", "high", "max"], default: "high" },
+    "deepseek/deepseek-v4.1-flash-fast": { levels: ["low", "high", "max"], default: "high" },
+    "deepseek/deepseek-v4-flash": { levels: ["high", "max"], default: "high" },
+    "deepseek/deepseek-v4-flash-fast": { levels: ["low", "high", "max"], default: "high" },
+    "deepseek/deepseek-v4-flash-vision-exp": { levels: ["high", "max"], default: "high" },
+    "deepseek/deepseek-v4-pro": { levels: ["high", "max"], default: "high" }
+  };
+
+  function cleanLevelList(value) {
+    const raw = Array.isArray(value) ? value : [];
+    const seen = Object.create(null);
+    const out = [];
+    raw.forEach(function (level) {
+      const text = String(level == null ? "" : level).trim().toLowerCase();
+      if (text && !seen[text]) {
+        seen[text] = true;
+        out.push(text);
+      }
+    });
+    return out;
+  }
+
+  /* Exact-model lookup. Model ids are case-insensitive. */
+  AR.getThinkingLevels = function (modelId) {
+    const id = String(modelId == null ? "" : modelId).trim().toLowerCase();
+    let entry = id && AR.THINKING_LEVELS[id];
+    // Command Code also accepts the short name after the vendor slash, so let
+    // "deepseek-v4.1-flash" resolve to "deepseek/deepseek-v4.1-flash".
+    if (!entry && id && id.indexOf("/") === -1) {
+      const suffix = "/" + id;
+      const match = Object.keys(AR.THINKING_LEVELS).find((key) => key.endsWith(suffix));
+      if (match) entry = AR.THINKING_LEVELS[match];
+    }
+    if (!entry) return { levels: [], default: "" };
+    const levels = cleanLevelList(entry.levels);
+    const fallback = levels.indexOf(String(entry.default || "").toLowerCase()) !== -1 ? entry.default : levels[0] || "";
+    return { levels: levels, default: fallback };
+  };
+
+  /* Resolve the effective level: an explicit valid choice wins, otherwise the
+   * model default, otherwise "" (send no effort field and let the API decide). */
+  AR.resolveThinkingLevel = function (modelId, requested) {
+    const info = AR.getThinkingLevels(modelId);
+    const value = String(requested == null ? "" : requested).trim().toLowerCase();
+    if (info.levels.indexOf(value) !== -1) return value;
+    // A provider can advertise a ladder we do not know about; trust an
+    // explicit safe value for it rather than silently dropping the choice.
+    if (!info.levels.length && /^[a-z][a-z0-9_-]{0,31}$/.test(value)) return value;
+    return info.default || info.levels[0] || "";
+  };
+
+  /* Read thinking metadata from a model row returned by a custom /models
+   * endpoint. Several common shapes are accepted so new providers work without
+   * an extension update; unknown rows fall back to the built-in table. */
+  AR.getThinkingLevelsFromModel = function (row, modelId) {
+    const r = row && typeof row === "object" ? row : {};
+    const id = String(modelId || r.id || "").trim();
+    const candidates = [
+      r.thinking_levels,
+      r.thinkingLevels,
+      r.supported_thinking_levels,
+      r.reasoning_efforts,
+      r.reasoningEfforts,
+      r.supported_reasoning_efforts,
+      r.thinking && (r.thinking.levels || r.thinking.efforts),
+      r.reasoning && (r.reasoning.levels || r.reasoning.efforts),
+      r.capabilities && (r.capabilities.thinking_levels || r.capabilities.reasoning_efforts),
+      r.capabilities && r.capabilities.thinking && (r.capabilities.thinking.levels || r.capabilities.thinking.efforts)
+    ];
+    let levels = [];
+    for (const candidate of candidates) {
+      levels = cleanLevelList(candidate);
+      if (levels.length) break;
+    }
+
+    if (!levels.length) return AR.getThinkingLevels(id);
+
+    const defaults = [
+      r.default_thinking_level,
+      r.defaultThinkingLevel,
+      r.default_reasoning_effort,
+      r.defaultReasoningEffort,
+      r.thinking && (r.thinking.default || r.thinking.default_level),
+      r.reasoning && (r.reasoning.default || r.reasoning.default_level),
+      r.capabilities && r.capabilities.default_thinking_level,
+      r.capabilities && r.capabilities.thinking && (r.capabilities.thinking.default || r.capabilities.thinking.default_level),
+      r.capabilities && r.capabilities.reasoning && (r.capabilities.reasoning.default || r.capabilities.reasoning.default_level)
+    ];
+    let fallback = "";
+    for (const candidate of defaults) {
+      const text = String(candidate == null ? "" : candidate).trim().toLowerCase();
+      if (levels.indexOf(text) !== -1) {
+        fallback = text;
+        break;
+      }
+    }
+    return { levels: levels, default: fallback || levels[0] };
+  };
+
+  /* Accept a bare base URL or a full endpoint and return the API root. */
+  AR.normalizeCustomBaseUrl = function (value) {
+    let base = String(value == null ? "" : value).trim();
+    if (!base) return "";
+    if (!/^[a-z][a-z0-9+.-]*:\/\//i.test(base)) {
+      // A bare host defaults to HTTPS; local servers almost always use HTTP.
+      base = /^(?:localhost|127\.0\.0\.1|\[::1\])(?::|\/|$)/i.test(base) ? "http://" + base : "https://" + base;
+    }
+    base = base.replace(/\/+$/, "");
+    base = base.replace(/\/(?:chat\/completions|responses|models)$/i, "");
+    return /^https?:\/\/[^/\s]+/i.test(base) ? base : "";
+  };
+
+  AR.customChatCompletionsUrl = function (baseUrl) {
+    const base = AR.normalizeCustomBaseUrl(baseUrl);
+    return base ? base + "/chat/completions" : "";
+  };
+
+  AR.customModelsUrl = function (baseUrl) {
+    const base = AR.normalizeCustomBaseUrl(baseUrl);
+    return base ? base + "/models" : "";
   };
 
   /* --------------------------------------------------------------- languages */
@@ -356,9 +499,21 @@
     const lang = (v, fallback) => (AR.langByCode(v) ? v : fallback);
     const has = (obj, key) => Object.prototype.hasOwnProperty.call(obj, key);
 
+    const customModel = str(r.customApiModel, d.customApiModel).trim();
+    const requestedThinking = str(r.customThinkingLevel, d.customThinkingLevel).trim().toLowerCase();
+    // Accept any safe effort token: custom providers can advertise ladders
+    // that are not in the built-in table (the UI only offers fetched values).
+    const customThinking =
+      !requestedThinking || /^[a-z][a-z0-9_-]{0,31}$/.test(requestedThinking) ? requestedThinking : "";
+
     return {
+      llmProvider: oneOf(r.llmProvider, ["gemini", "custom"], d.llmProvider),
       geminiApiKey: str(r.geminiApiKey, d.geminiApiKey),
       geminiModel: str(r.geminiModel, d.geminiModel).trim(),
+      customApiBaseUrl: AR.normalizeCustomBaseUrl(str(r.customApiBaseUrl, d.customApiBaseUrl)) || d.customApiBaseUrl,
+      customApiKey: str(r.customApiKey, d.customApiKey),
+      customApiModel: customModel,
+      customThinkingLevel: customThinking,
       targetLang: lang(r.targetLang, d.targetLang),
       baseLang: lang(r.baseLang, d.baseLang),
       ttsProvider: oneOf(r.ttsProvider, ["google", "browser"], d.ttsProvider),

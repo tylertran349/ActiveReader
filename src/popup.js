@@ -40,7 +40,8 @@
     els.ttsProvider.value = settings.ttsProvider;
     els.showToolbar.checked = !!settings.showToolbar;
     els.autoTranslate.checked = !!settings.autoTranslate;
-    els.keyWarning.hidden = !!String(settings.geminiApiKey || "").trim();
+    const custom = settings.llmProvider === "custom";
+    els.keyWarning.hidden = !!String((custom ? settings.customApiKey : settings.geminiApiKey) || "").trim();
 
     els.targetLang.addEventListener("change", () => update({ targetLang: els.targetLang.value }));
     els.baseLang.addEventListener("change", () => update({ baseLang: els.baseLang.value }));

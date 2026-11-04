@@ -566,7 +566,7 @@
         <div class="ar-result${rtl}">${AR.escapeHtml(t.text)}</div>
         <div class="ar-meta">
           ${t.detected ? "Detected: " + AR.escapeHtml(AR.langLabel(t.detected)) + " · " : ""}
-          ${t.engine === "gemini" ? "Gemini" : "Google Translate"} · Into ${AR.escapeHtml(
+          ${t.engine === "gemini" ? "AI model" : "Google Translate"} · Into ${AR.escapeHtml(
             AR.langLabel(settings.baseLang)
           )}
         </div>`;
@@ -649,7 +649,7 @@
     } else if (state.quiz.status === "done") {
       body = state.quiz.questions.map((q, i) => htmlQuestion(q, i)).join("");
     } else {
-      body = `<div class="ar-hint">Gemini will write comprehension questions about the highlighted text. Answers and explanations are shown as you go.</div>`;
+      body = `<div class="ar-hint">Your AI model will write comprehension questions about the highlighted text. Answers and explanations are shown as you go.</div>`;
     }
 
     const controls = `
@@ -695,12 +695,12 @@
     `;
 
     const truncNote = isQuizTruncated()
-      ? `<div class="ar-hint">Only the first ${MAX_QUIZ_CHARS} characters were sent to Gemini.</div>`
+      ? `<div class="ar-hint">Only the first ${MAX_QUIZ_CHARS} characters were sent to the AI model.</div>`
       : "";
 
     const shortNote =
       hasQuestions && state.quiz.requested && state.quiz.questions.length < state.quiz.requested
-        ? `<div class="ar-hint">Gemini returned ${state.quiz.questions.length} of ${state.quiz.requested} questions. Press <b>New quiz</b> to try for more.</div>`
+        ? `<div class="ar-hint">The AI model returned ${state.quiz.questions.length} of ${state.quiz.requested} questions. Press <b>New quiz</b> to try for more.</div>`
         : "";
 
     const staleNote =
@@ -1008,9 +1008,10 @@
     state.quiz.translations = {};
   }
 
-  /* Free-response answers are graded by Gemini so that equivalent wording and
-   * small typos still count, and so the learner gets feedback in their own
-   * language. If Gemini is unavailable we fall back to a plain string match. */
+  /* Free-response answers are graded by the configured AI model so that
+   * equivalent wording and small typos still count, and so the learner gets
+   * feedback in their own language. If it is unavailable we fall back to a
+   * plain string match. */
   async function gradeAnswer(i, q, userAnswer) {
     state.quiz.grading[i] = true;
     render();
@@ -1046,7 +1047,7 @@
         correct: normalizeAnswer(userAnswer) === normalizeAnswer(q.answer),
         feedback: ""
       };
-      toast((res && res.error) || "Could not reach Gemini — checked automatically");
+      toast((res && res.error) || "Could not reach the AI model — checked automatically");
     }
     render();
   }

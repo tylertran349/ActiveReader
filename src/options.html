@@ -29,43 +29,112 @@
         translate it or quiz yourself on it.
       </p>
 
-      <!-- Gemini -->
+      <!-- AI provider -->
       <section class="card">
-        <h2>Gemini AI</h2>
+        <h2>AI provider</h2>
         <p class="desc">
-          Quiz generation and (optionally) translation use the Google Gemini API. Audio and Google
-          Translate work without a key. Get a free key from
-          <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Google AI Studio</a>.
-          Your key is stored in Chrome sync storage and is only ever sent to Google.
+          Quiz generation, answer grading and (optionally) translation use one AI model. Choose
+          Google Gemini, or point ActiveReader at any OpenAI-compatible custom API.
         </p>
 
         <label class="field">
-          <span>API key</span>
-          <span class="input-row">
-            <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…" />
-            <button id="toggle-key" class="btn ghost" type="button">Show</button>
-          </span>
+          <span>Provider</span>
+          <select id="llm-provider">
+            <option value="gemini">Google Gemini</option>
+            <option value="custom">Custom API (OpenAI-compatible)</option>
+          </select>
         </label>
 
-        <label class="field">
-          <span>Model</span>
-          <span class="input-row">
-            <input id="gemini-model" list="model-list" spellcheck="false" autocomplete="off"
-                   placeholder="Type any model ID, e.g. gemini-2.5-flash" />
-            <button id="fetch-models" class="btn" type="button">Fetch models</button>
-          </span>
-          <datalist id="model-list"></datalist>
-        </label>
-        <div id="model-suggestions" class="chips"></div>
-        <p class="desc">
-          The model ID is free text, so new Gemini models work the moment Google releases them —
-          no extension update needed. Leave it blank and ActiveReader will pick one from the live
-          list, or use <b>Fetch models</b> to choose yourself.
-        </p>
+        <!-- Gemini -->
+        <div id="gemini-fields" class="provider-fields">
+          <p class="desc">
+            Get a free key from
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener">Google AI Studio</a>.
+            Your key is stored in Chrome sync storage and is only ever sent to Google.
+          </p>
 
-        <div class="row">
-          <button id="test-gemini" class="btn" type="button">Test connection</button>
-          <span id="test-result" class="test-result"></span>
+          <label class="field">
+            <span>API key</span>
+            <span class="input-row">
+              <input id="api-key" type="password" autocomplete="off" spellcheck="false" placeholder="AIza…" />
+              <button id="toggle-key" class="btn ghost" type="button">Show</button>
+            </span>
+          </label>
+
+          <label class="field">
+            <span>Model</span>
+            <span class="input-row">
+              <input id="gemini-model" list="model-list" spellcheck="false" autocomplete="off"
+                     placeholder="Type any model ID, e.g. gemini-2.5-flash" />
+              <button id="fetch-models" class="btn" type="button">Fetch models</button>
+            </span>
+            <datalist id="model-list"></datalist>
+          </label>
+          <div id="model-suggestions" class="chips"></div>
+          <p class="desc">
+            The model ID is free text, so new Gemini models work the moment Google releases them —
+            no extension update needed. Leave it blank and ActiveReader will pick one from the live
+            list, or use <b>Fetch models</b> to choose yourself.
+          </p>
+
+          <div class="row">
+            <button id="test-gemini" class="btn" type="button">Test connection</button>
+            <span id="test-result" class="test-result"></span>
+          </div>
+        </div>
+
+        <!-- Custom OpenAI-compatible API -->
+        <div id="custom-fields" class="provider-fields">
+          <p class="desc">
+            Enter any OpenAI-compatible base URL and model ID. For the
+            <b>Command Code Provider API</b> (GOAT plan), use
+            <code>https://api.commandcode.ai/provider/v1</code> and
+            <code>deepseek/deepseek-v4.1-flash</code>. The host must be allowed in
+            <code>manifest.json</code>.
+          </p>
+
+          <label class="field">
+            <span>Base URL</span>
+            <input id="custom-base-url" type="url" spellcheck="false" autocomplete="off"
+                   placeholder="https://api.commandcode.ai/provider/v1" />
+          </label>
+
+          <label class="field">
+            <span>API key</span>
+            <span class="input-row">
+              <input id="custom-api-key" type="password" autocomplete="off" spellcheck="false" placeholder="Paste your API key" />
+              <button id="toggle-custom-key" class="btn ghost" type="button">Show</button>
+            </span>
+          </label>
+
+          <label class="field">
+            <span>Model ID</span>
+            <span class="input-row">
+              <input id="custom-model" list="custom-model-list" spellcheck="false" autocomplete="off"
+                     placeholder="deepseek/deepseek-v4.1-flash" />
+              <button id="fetch-custom-models" class="btn" type="button">Fetch models</button>
+            </span>
+            <datalist id="custom-model-list"></datalist>
+          </label>
+          <div id="custom-model-suggestions" class="chips"></div>
+          <p class="desc">
+            Type any model ID the provider supports — suggestions are optional. Fetch models fills
+            the list and updates the thinking levels when the model is selected.
+          </p>
+
+          <label class="field" id="custom-thinking-field">
+            <span>Thinking level</span>
+            <select id="custom-thinking-level"></select>
+          </label>
+          <p class="desc" id="custom-thinking-note">
+            Levels are read from the model's capabilities. The model's default is selected unless
+            you choose another level.
+          </p>
+
+          <div class="row">
+            <button id="test-custom" class="btn" type="button">Test connection</button>
+            <span id="test-result-custom" class="test-result"></span>
+          </div>
         </div>
       </section>
 
@@ -83,8 +152,8 @@
           </label>
         </div>
         <p class="desc">
-          Your own language — used for translations, quiz explanations and the feedback Gemini gives
-          on your answers.
+          Your own language — used for translations, quiz explanations and the feedback the AI model
+          gives on your answers.
         </p>
       </section>
 
@@ -95,11 +164,12 @@
           <span>Translation engine</span>
           <select id="translation-engine">
             <option value="google">Google Translate (fast, no key)</option>
-            <option value="gemini">Gemini (uses your API key)</option>
+            <option value="gemini">AI model (uses your provider and key)</option>
           </select>
         </label>
         <p class="desc">
-          If the chosen engine fails, ActiveReader automatically tries the other one.
+          The AI option uses whichever provider is selected above. If it fails, ActiveReader
+          automatically falls back to Google Translate.
         </p>
       </section>
 
@@ -284,7 +354,7 @@
           ActiveReader keeps a spare copy of your settings inside the browser and restores them
           automatically if they go missing after a clean. For a full profile clean (for example with
           PrivaZer), also download a backup file and keep it somewhere safe — it also saves your
-          vocabulary and <b>contains your Gemini API key</b>.
+          vocabulary and <b>contains your API keys</b>.
         </p>
         <div class="row">
           <button id="export-settings" class="btn" type="button">Download backup file</button>

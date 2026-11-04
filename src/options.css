@@ -257,6 +257,16 @@ main {
   white-space: nowrap;
 }
 
+.provider-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.provider-fields[hidden] {
+  display: none;
+}
+
 .grid2 {
   display: grid;
   grid-template-columns: 1fr 1fr;

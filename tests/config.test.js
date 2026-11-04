@@ -240,6 +240,85 @@ test("hasUpdate recomputes availability instead of trusting the stored flag", ()
   assert.strictEqual(AR.hasUpdate(null), false);
 });
 
+test("custom provider settings normalize with a safe base URL", () => {
+  const s = AR.normalizeSettings({
+    llmProvider: "custom",
+    customApiBaseUrl: " https://api.commandcode.ai/provider/v1/chat/completions/ ",
+    customApiKey: 123,
+    customApiModel: "  deepseek/deepseek-v4.1-flash  ",
+    customThinkingLevel: " MAX "
+  });
+  assert.strictEqual(s.llmProvider, "custom");
+  assert.strictEqual(s.customApiBaseUrl, "https://api.commandcode.ai/provider/v1");
+  assert.strictEqual(s.customApiKey, "");
+  assert.strictEqual(s.customApiModel, "deepseek/deepseek-v4.1-flash");
+  assert.strictEqual(s.customThinkingLevel, "max");
+
+  assert.strictEqual(AR.normalizeSettings({ llmProvider: "bogus" }).llmProvider, "gemini");
+  assert.strictEqual(AR.normalizeSettings({ customThinkingLevel: "<script>" }).customThinkingLevel, "");
+  assert.strictEqual(AR.normalizeSettings({}).customApiBaseUrl, "");
+  assert.strictEqual(AR.normalizeSettings({}).customApiModel, "");
+  assert.strictEqual(AR.normalizeSettings({}).customThinkingLevel, "");
+});
+
+test("DeepSeek V4.1 Flash exposes its documented thinking ladder", () => {
+  const info = AR.getThinkingLevels("deepseek/deepseek-v4.1-flash");
+  assert.deepStrictEqual(info.levels, ["low", "high", "max"]);
+  assert.strictEqual(info.default, "high");
+
+  assert.strictEqual(AR.resolveThinkingLevel("deepseek/deepseek-v4.1-flash", ""), "high");
+  assert.strictEqual(AR.resolveThinkingLevel("deepseek/deepseek-v4.1-flash", "max"), "max");
+  assert.strictEqual(AR.resolveThinkingLevel("deepseek/deepseek-v4.1-flash", "bogus"), "high");
+  assert.deepStrictEqual(AR.getThinkingLevels("deepseek-v4.1-flash"), info);
+  assert.deepStrictEqual(AR.getThinkingLevels("unknown/model"), { levels: [], default: "" });
+  // Known models reject an unknown token; an unknown model keeps an explicit
+  // safe token so provider-advertised ladders still work.
+  assert.strictEqual(AR.resolveThinkingLevel("unknown/model", "max"), "max");
+  assert.strictEqual(AR.resolveThinkingLevel("unknown/model", "<bad>"), "");
+});
+
+test("think levels can be read from custom model-row metadata", () => {
+  const fromRow = AR.getThinkingLevelsFromModel(
+    { id: "acme/reasoner", reasoning_efforts: ["minimal", "low", "high"], default_reasoning_effort: "low" },
+    "acme/reasoner"
+  );
+  assert.deepStrictEqual(fromRow.levels, ["minimal", "low", "high"]);
+  assert.strictEqual(fromRow.default, "low");
+
+  const nested = AR.getThinkingLevelsFromModel(
+    { id: "acme/nested", capabilities: { thinking: { efforts: ["low", "max"], default: "max" } } },
+    "acme/nested"
+  );
+  assert.deepStrictEqual(nested.levels, ["low", "max"]);
+  assert.strictEqual(nested.default, "max");
+
+  // No metadata: fall back to the built-in table.
+  const fallback = AR.getThinkingLevelsFromModel({ id: "deepseek/deepseek-v4.1-flash" });
+  assert.deepStrictEqual(fallback.levels, ["low", "high", "max"]);
+  assert.strictEqual(fallback.default, "high");
+});
+
+test("custom endpoint helpers accept bare roots and full chat URLs", () => {
+  assert.strictEqual(
+    AR.customChatCompletionsUrl("https://api.commandcode.ai/provider/v1"),
+    "https://api.commandcode.ai/provider/v1/chat/completions"
+  );
+  assert.strictEqual(
+    AR.customChatCompletionsUrl("https://api.commandcode.ai/provider/v1/chat/completions/"),
+    "https://api.commandcode.ai/provider/v1/chat/completions"
+  );
+  assert.strictEqual(
+    AR.customModelsUrl("https://example.com/v1/responses"),
+    "https://example.com/v1/models"
+  );
+  assert.strictEqual(AR.normalizeCustomBaseUrl("api.commandcode.ai/provider/v1"), "https://api.commandcode.ai/provider/v1");
+  assert.strictEqual(AR.normalizeCustomBaseUrl("localhost:11434/v1"), "http://localhost:11434/v1");
+  assert.strictEqual(
+    AR.normalizeCustomBaseUrl("https://api.commandcode.ai/provider/v1/models"),
+    "https://api.commandcode.ai/provider/v1"
+  );
+});
+
 (async () => {
   console.log("config.js");
   let passed = 0;

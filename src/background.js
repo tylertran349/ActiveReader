@@ -1,7 +1,7 @@
 /*
  * ActiveReader service worker.
- * Owns every network call (Gemini + Google Translate), TTS orchestration and
- * the context menu. Keeps API keys out of web pages.
+ * Owns every network call (Gemini/custom AI + Google Translate), TTS
+ * orchestration and the context menu. Keeps API keys out of web pages.
  */
 importScripts("lib/config.js");
 
@@ -179,7 +179,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       handleSave(msg).then(sendResponse);
       return true;
     case MSG.TEST_GEMINI:
-      testGemini().then(sendResponse);
+      testAI().then(sendResponse);
       return true;
     case MSG.LIST_MODELS:
       listModels(!!msg.force).then(sendResponse);
@@ -492,26 +492,33 @@ async function handleTranslate(msg) {
   const target = msg.baseLang || settings.baseLang;
   const source = msg.sourceLang || "auto";
   const engine = msg.engine || settings.translationEngine;
+  // Include the active LLM backend so switching Gemini <-> custom never reuses
+  // a translation produced by the other one.
+  const cacheEngine = engine === "gemini" ? "gemini:" + settings.llmProvider : engine;
 
-  const cacheKey = translationCacheKey(text, target, engine);
+  const cacheKey = translationCacheKey(text, target, cacheEngine);
   const cached = await getCachedTranslation(cacheKey);
   if (cached) return { ok: true, cached: true, ...cached };
 
   try {
     const result =
       engine === "gemini"
-        ? { translation: await geminiTranslate(text, target, settings), detected: "", engine: "gemini" }
+        ? { translation: await llmTranslate(text, target, settings), detected: "", engine: "gemini" }
         : { engine: "google", ...(await googleTranslate(text, source, target)) };
     await setCachedTranslation(cacheKey, result);
     return { ok: true, ...result };
   } catch (primaryError) {
-    // Graceful fallback to the other engine.
+    // Graceful fallback to the other engine. Cache it under its own engine key
+    // so a one-off failure never makes the primary engine return the fallback
+    // translation from cache on later requests.
     try {
+      const fallbackEngine = engine === "gemini" ? "google" : "gemini:" + settings.llmProvider;
+      const fallbackKey = translationCacheKey(text, target, fallbackEngine);
       const result =
         engine !== "gemini"
-          ? { translation: await geminiTranslate(text, target, settings), detected: "", engine: "gemini" }
+          ? { translation: await llmTranslate(text, target, settings), detected: "", engine: "gemini" }
           : { engine: "google", ...(await googleTranslate(text, source, target)) };
-      await setCachedTranslation(cacheKey, result);
+      await setCachedTranslation(fallbackKey, result);
       return { ok: true, ...result };
     } catch (e) {
       return { ok: false, error: primaryError.message || "Translation failed." };
@@ -546,7 +553,7 @@ async function googleTranslate(text, source, target) {
   return { translation: translation.trim(), detected };
 }
 
-async function geminiTranslate(text, target, settings) {
+async function llmTranslate(text, target, settings) {
   const langName = AR.langName(target);
   const prompt = [
     `Translate the text below into ${langName}.`,
@@ -556,8 +563,141 @@ async function geminiTranslate(text, target, settings) {
     `Text:`,
     text
   ].join("\n");
-  const out = await callGemini(prompt, settings, null, 0.2, 4096);
+  const out = await callLLM(prompt, settings, null, 0.2, 4096);
   return out.trim();
+}
+
+/* ----------------------------------------------------------- AI provider */
+
+/* Route every LLM call through whichever backend is selected in settings. The
+ * Gemini path keeps its native schema support; the custom path speaks the
+ * OpenAI Chat Completions dialect used by Command Code and most gateways. */
+async function callLLM(prompt, settings, schema, temperature, maxOutputTokens) {
+  if (settings.llmProvider === "custom") {
+    return callCustomModel(prompt, settings, schema, temperature, maxOutputTokens);
+  }
+  return callGemini(prompt, settings, schema, temperature, maxOutputTokens);
+}
+
+async function callCustomModel(prompt, settings, schema, temperature, maxOutputTokens) {
+  const key = String(settings.customApiKey || "").trim();
+  if (!key) {
+    throw new Error("No API key set for the custom provider. Open ActiveReader settings to add one.");
+  }
+
+  const model = String(settings.customApiModel || "").trim();
+  if (!model) {
+    throw new Error(
+      "No custom model set. Open ActiveReader settings and click “Fetch models” to pick one."
+    );
+  }
+
+  const url = AR.customChatCompletionsUrl(settings.customApiBaseUrl);
+  if (!url) {
+    throw new Error("No custom API base URL set. Open ActiveReader settings to add one.");
+  }
+
+  const body = {
+    model,
+    messages: [{ role: "user", content: prompt }],
+    temperature: temperature == null ? 0.7 : temperature,
+    max_tokens: maxOutputTokens || 4096,
+    stream: false
+  };
+
+  // DeepSeek and OpenAI-style reasoning models accept this on Chat
+  // Completions. When the field is omitted the provider uses its own default,
+  // which is exactly what the "model default" entry in the UI means.
+  const effort = AR.resolveThinkingLevel(model, settings.customThinkingLevel);
+  if (effort) body.reasoning_effort = effort;
+
+  // JSON mode improves quiz/grading reliability on supported gateways. Retry
+  // once without it if a provider rejects the field.
+  if (schema) body.response_format = { type: "json_object" };
+
+  let res;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + key
+      },
+      body: JSON.stringify(body)
+    });
+  } catch (e) {
+    throw new Error("Could not reach the custom API. Check the base URL and your network connection.");
+  }
+
+  let data = await res.json().catch(() => ({}));
+
+  if (!res.ok && body.response_format && res.status === 400) {
+    // Some OpenAI-compatible servers do not implement response_format. Only
+    // retry when the error points at that field, so a genuinely bad request
+    // is not sent twice.
+    const probe = JSON.stringify(data || {});
+    if (/response_format|json[_ ]?object|json mode/i.test(probe)) {
+      delete body.response_format;
+      try {
+        res = await fetch(url, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + key
+          },
+          body: JSON.stringify(body)
+        });
+        data = await res.json().catch(() => ({}));
+      } catch (e) {
+        throw new Error("Could not reach the custom API. Check the base URL and your network connection.");
+      }
+    }
+  }
+
+  if (!res.ok) {
+    const detail =
+      (data && data.error && (data.error.message || data.error.type)) ||
+      (data && data.message) ||
+      "";
+    throw new Error(customApiErrorMessage(res.status, detail));
+  }
+
+  const choice = data && data.choices && data.choices[0];
+  const message = choice && choice.message;
+  let text = "";
+
+  if (message) {
+    if (typeof message.content === "string") {
+      text = message.content;
+    } else if (Array.isArray(message.content)) {
+      text = message.content
+        .map((part) => (typeof part === "string" ? part : (part && (part.text || part.content)) || ""))
+        .join("");
+    }
+  }
+
+  // Anthropic-shaped or non-standard gateways occasionally answer with a
+  // top-level content array instead of choices.
+  if (!text.trim() && Array.isArray(data && data.content)) {
+    text = data.content.map((part) => (part && part.text) || "").join("");
+  }
+
+  if (!text.trim()) {
+    const reason = (choice && choice.finish_reason) || (data && data.stop_reason) || "";
+    throw new Error(reason ? "The AI model returned no text (" + reason + ")." : "The AI model returned an empty response.");
+  }
+
+  return text;
+}
+
+function customApiErrorMessage(status, detail) {
+  const suffix = detail ? " — " + detail : "";
+  if (status === 400) return "The custom API rejected the request (400). Check the model ID and that it supports this prompt." + suffix;
+  if (status === 401 || status === 403) return "The custom API refused the API key (" + status + "). Check the key and your plan." + suffix;
+  if (status === 404) return "The custom API endpoint or model was not found (404). Check the base URL and model ID." + suffix;
+  if (status === 429) return "The custom API rate limit or quota was reached (429). Wait a moment or check your plan." + suffix;
+  if (status >= 500) return "The custom API had a server error (" + status + "). Try again shortly." + suffix;
+  return "The custom API request failed (" + status + ")." + suffix;
 }
 
 /* -------------------------------------------------------------- gemini */
@@ -635,11 +775,11 @@ function geminiErrorMessage(status, detail) {
   return "Gemini request failed (" + status + ")." + suffix;
 }
 
-async function testGemini() {
+async function testAI() {
   const settings = await AR.getSettings();
   try {
-    const out = await callGemini("Reply with exactly: OK", settings, null, 0, 16);
-    return { ok: true, reply: out.trim().slice(0, 60) };
+    const out = await callLLM("Reply with exactly: OK", settings, null, 0, 16);
+    return { ok: true, reply: out.trim().slice(0, 60), provider: settings.llmProvider };
   } catch (e) {
     return { ok: false, error: e.message };
   }
@@ -672,10 +812,15 @@ async function setCachedModels(keyTag, models) {
 
 async function listModels(force) {
   const settings = await AR.getSettings();
+  if (settings.llmProvider === "custom") return listCustomModels(settings, force);
+  return listGeminiModels(settings, force);
+}
+
+async function listGeminiModels(settings, force) {
   const key = String(settings.geminiApiKey || "").trim();
   if (!key) return { ok: false, error: "Add a Gemini API key first." };
 
-  const keyTag = hashString(key).toString(36);
+  const keyTag = "gemini|" + hashString(key).toString(36);
 
   if (!force) {
     const cached = await getCachedModels(keyTag);
@@ -722,6 +867,69 @@ async function listModels(force) {
     return { ok: true, models };
   } catch (e) {
     return { ok: false, error: "Could not reach Gemini. Check your network connection." };
+  }
+}
+
+/* OpenAI-compatible discovery: GET {base}/models. Thinking levels come from
+ * the row's own metadata when the provider exposes it, otherwise from the
+ * built-in Command Code/DeepSeek ladder table. */
+async function listCustomModels(settings, force) {
+  const base = AR.normalizeCustomBaseUrl(settings.customApiBaseUrl) || AR.DEFAULTS.customApiBaseUrl;
+  const url = AR.customModelsUrl(base);
+  if (!url) return { ok: false, error: "Add a custom API base URL first." };
+
+  const key = String(settings.customApiKey || "").trim();
+  const keyTag = "custom|" + hashString(base + "|" + key).toString(36);
+
+  if (!force) {
+    const cached = await getCachedModels(keyTag);
+    if (cached) return { ok: true, models: cached, cached: true };
+  }
+
+  const headers = { Accept: "application/json" };
+  if (key) headers.Authorization = "Bearer " + key;
+
+  try {
+    const res = await fetch(url, { method: "GET", headers });
+    const data = await res.json().catch(() => ({}));
+
+    if (!res.ok) {
+      const message =
+        (data && data.error && data.error.message) || "Could not list models (" + res.status + ").";
+      return { ok: false, error: message };
+    }
+
+    const rows = Array.isArray(data && data.data)
+      ? data.data
+      : Array.isArray(data && data.models)
+        ? data.models
+        : [];
+
+    const models = rows
+      .filter((m) => {
+        if (!m) return false;
+        // Skip models that cannot answer on Chat Completions (for example
+        // Command Code's Claude rows, which only serve /messages).
+        const endpoints = Array.isArray(m.supported_endpoints) ? m.supported_endpoints : null;
+        return !endpoints || endpoints.some((endpoint) => /chat\/completions/i.test(String(endpoint)));
+      })
+      .map((m) => {
+        const id = String(m.id || m.name || "").replace(/^models\//, "");
+        const thinking = AR.getThinkingLevelsFromModel(m, id);
+        return {
+          id,
+          displayName: String(m.name || m.displayName || ""),
+          thinkingLevels: thinking.levels,
+          defaultThinkingLevel: thinking.default
+        };
+      })
+      .filter((m) => m.id)
+      .sort((a, b) => a.id.localeCompare(b.id));
+
+    await setCachedModels(keyTag, models);
+    return { ok: true, models };
+  } catch (e) {
+    return { ok: false, error: "Could not reach the custom API. Check the base URL and your network connection." };
   }
 }
 
@@ -790,7 +998,7 @@ async function generateQuestions(text, cfg, settings, wantCount) {
   for (let round = 0; round < QUIZ_MAX_ROUNDS && collected.length < wantCount; round++) {
     const need = wantCount - collected.length;
     const prompt = buildQuizPrompt(text, cfg, settings, need, collected);
-    const raw = await callGemini(prompt, settings, QUIZ_SCHEMA, 0.85, 4096);
+    const raw = await callLLM(prompt, settings, QUIZ_SCHEMA, 0.85, 4096);
 
     let parsed;
     try {
@@ -875,7 +1083,13 @@ function buildQuizPrompt(text, cfg, settings, count, existing) {
     existing.forEach((q) => lines.push(`- ${q.question}`));
   }
 
-  lines.push(``, `Return JSON only, matching the provided schema.`, ``, `TEXT:`, text);
+  lines.push(
+    ``,
+    `Return JSON only, with a top-level "questions" array. Each item has "type" ("mcq", "short" or "blank"), "question", optional "options" (4 strings for mcq), optional "answerIndex", "answer", and optional "explanation".`,
+    ``,
+    `TEXT:`,
+    text
+  );
   return lines.join("\n");
 }
 
@@ -919,7 +1133,7 @@ function parseJsonLoose(raw) {
       }
     }
   }
-  throw new Error("Could not parse the quiz JSON returned by Gemini.");
+  throw new Error("Could not parse the quiz JSON returned by the AI model.");
 }
 
 /* --------------------------------------------------------------- grading */
@@ -933,7 +1147,7 @@ const GRADE_SCHEMA = {
   required: ["correct", "feedback"]
 };
 
-/* Grade a free-response answer with Gemini. The model is asked to accept
+/* Grade a free-response answer with the configured AI model. The model is asked to accept
  * semantically equivalent answers and to write its feedback in the learner's
  * own language (baseLang). */
 async function handleGrade(msg) {
@@ -963,11 +1177,11 @@ async function handleGrade(msg) {
     `- Set "correct" to true when the learner's answer shows the right meaning. Accept answers that are semantically equivalent to the expected answer and ignore case, punctuation and small typos.`,
     `- Be honest but encouraging: a partly correct answer is not correct, but point out what they got right.`,
     `- Write "feedback" in ${base} using 1-3 short sentences. Explain why the answer is right or wrong, gently correct mistakes and, when helpful, show the correct or a more natural phrasing.`,
-    `- Return JSON only, matching the provided schema.`
+    `- Return JSON only, in the shape {"correct": true or false, "feedback": "..."}.`
   ].filter(Boolean);
 
   try {
-    const raw = await callGemini(lines.join("\n"), settings, GRADE_SCHEMA, 0.2, 512);
+    const raw = await callLLM(lines.join("\n"), settings, GRADE_SCHEMA, 0.2, 512);
     const parsed = parseJsonLoose(raw);
     return {
       ok: true,

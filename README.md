@@ -14,8 +14,8 @@ dependencies.
 | | |
 |---|---|
 | 🔊 **Text to speech** | Uses the Google Translate voice by default (natural, no API key). Falls back to the built-in browser voice if Google is unreachable. Long selections are split into chunks automatically. |
-| 🌐 **Translation** | Translates the highlighted text into your own language via Google Translate, with an optional Gemini engine, and reports the detected source language. Small speaker buttons play the original or the translation aloud. |
-| 🎓 **AI quizzes** | Gemini generates multiple-choice, short-answer and fill-in-the-blank questions from the selection. Answer them inline and get instant feedback: free-response answers are graded by Gemini (equivalent wording and small typos count) with a short explanation written in your own language. A **Translate question** button under each question shows it in your own language. Your last quiz stays put when you highlight new text or switch tabs, and if the model returns fewer questions than you asked for, ActiveReader automatically asks again to fill the quiz. |
+| 🌐 **Translation** | Translates the highlighted text into your own language via Google Translate, with an optional AI engine, and reports the detected source language. Small speaker buttons play the original or the translation aloud. |
+| 🎓 **AI quizzes** | Your chosen AI model generates multiple-choice, short-answer and fill-in-the-blank questions from the selection. Answer them inline and get instant feedback: free-response answers are graded by the model (equivalent wording and small typos count) with a short explanation written in your own language. A **Translate question** button under each question shows it in your own language. Your last quiz stays put when you highlight new text or switch tabs, and if the model returns fewer questions than you asked for, ActiveReader automatically asks again to fill the quiz. |
 | ⭐ **Vocabulary** | Save words/phrases with their translation and source page. Search, export (JSON/CSV) and manage them in settings. |
 | ⬆️ **Update checks** | ActiveReader notices when its own version changes and, optionally, checks this GitHub project for a newer build every 12 hours. When one exists you get a toolbar badge, an optional notification, an in-popup banner and a one-click update page. |
 | ⚙️ **Persistent settings** | API key, languages, voice, quiz defaults, theme and more are stored in Chrome sync storage. |
@@ -34,7 +34,7 @@ double-clicked, or keyboard-highlighted.
 3. Click **Load unpacked** and choose this folder.
 4. Pin **ActiveReader** to the toolbar.
 
-Then open the extension's **Settings** and paste a Gemini API key (see below).
+Then open the extension's **Settings** and add a Gemini or custom API key (see below).
 
 > After installing or updating, reload any tabs that were already open so the
 > content script is injected. The right-click menu injects it on demand.
@@ -51,7 +51,27 @@ Then open the extension's **Settings** and paste a Gemini API key (see below).
 
 The key is stored in `chrome.storage.sync` and is only ever sent to
 `generativelanguage.googleapis.com`. Translation and audio work without a key;
-only quizzes (and optional Gemini translation) need one.
+only quizzes (and optional AI translation) need one.
+
+### Using a custom API (Command Code / DeepSeek)
+
+Choose **Custom API (OpenAI-compatible)** as the AI provider to use any
+OpenAI-compatible endpoint. Both the base URL and model ID are blank by
+default; enter your provider's values or fetch its live model list.
+
+For the [Command Code Provider API](https://commandcode.ai/docs/provider) on the
+GOAT plan:
+
+- **Base URL** — enter `https://api.commandcode.ai/provider/v1`
+- **Model** — a free-text field; type `deepseek/deepseek-v4.1-flash` (or any
+  other model ID) or fetch the provider's live list.
+- **Thinking level** — populated from the model's advertised levels
+  (`low`, `high`, `max` for DeepSeek V4.1 Flash). The model's default level is
+  selected automatically; pick another to override it.
+
+The API key is stored in Chrome sync storage and is only ever sent to the base
+URL you enter. Only hosts granted in the manifest can be reached; Command Code's
+API is included by default.
 
 ---
 
@@ -72,9 +92,9 @@ You can also right-click a selection and pick an ActiveReader action.
 
 Open settings from the panel's ⚙ button, the popup, or `chrome://extensions`.
 
-- **Gemini AI** — API key, **model** (a free-text field — type any model ID, or click *Fetch models* to load the live list your key can access), connection test.
-- **Languages** — the language you are learning and your own language, used for translations, quiz explanations and Gemini's answer feedback.
-- **Translation** — Google Translate or Gemini (automatic fallback to the other).
+- **AI provider** — Google Gemini, or a custom OpenAI-compatible API (base URL, key, model, and a thinking-level dropdown populated from the model's capabilities), plus a connection test.
+- **Languages** — the language you are learning and your own language, used for translations, quiz explanations and the AI model's answer feedback.
+- **Translation** — Google Translate or your AI provider (automatic fallback to the other).
 - **Text to speech** — Google Translate voice or browser voice, plus speed, pitch and a preview box.
 - **Reading & selection** — floating toolbar on/off, auto-translate, auto-save lookups, minimum/maximum selection size, and where the extension runs: on **every site except the ones you block**, or **only on the sites you allow** (per-site allow and block lists).
 - **Quiz defaults** — which question types to generate, difficulty, number of questions, question language and whether to include explanations.
@@ -133,7 +153,7 @@ manifest.json            MV3 manifest
 icons/                   toolbar + store icons
 tests/config.test.js     unit tests for the shared config helpers
 src/
-  background.js          service worker: Gemini, translation, TTS, context menus, update checks
+  background.js          service worker: AI providers, translation, TTS, context menus, update checks
   content.js             selection toolbar + Translate/Audio/Quiz panel
   content.css            styles for the injected shadow-DOM UI
   offscreen.html/.js     plays Google Translate TTS audio in an extension context
@@ -162,11 +182,12 @@ Translate MP3s and plays them, keeping playback reliable regardless of the page.
 
 ## Privacy
 
-- No analytics and no remote servers other than Google and (for update checks)
-  GitHub. The update check downloads one public file and reads only its version
-  number; see [Updating ActiveReader](#updating-activereader).
-- Selected text is sent to Google Translate for translation/audio and to the
-  Gemini API for quizzes, and nowhere else.
+- No analytics and no remote servers other than Google, the AI provider you
+  configure, and (for update checks) GitHub. The update check downloads one
+  public file and reads only its version number; see
+  [Updating ActiveReader](#updating-activereader).
+- Selected text is sent to Google Translate for translation/audio and to your
+  chosen AI provider (Gemini by default) for quizzes, and nowhere else.
 - The API key never touches the page — all requests are made from the extension's
   service worker.
 - Saved vocabulary lives in `chrome.storage.local` on your machine.
@@ -179,9 +200,9 @@ Translate MP3s and plays them, keeping playback reliable regardless of the page.
 
 - Translations are cached per page and session-wide, and quizzes are cached per
   page, so re-opening the panel or re-reading a passage does not repeat a call.
-- The Gemini model list is cached for 12 hours. **Fetch models** always refreshes
+- The AI model list is cached for 12 hours. **Fetch models** always refreshes
   it; automatic model selection reuses the cache.
-- Gemini output is bounded and quiz/translation text is capped — very long
+- AI output is bounded and quiz/translation text is capped — very long
   selections are trimmed and the panel tells you when that happens.
 - The audio offscreen document closes itself after playback has been idle for
   30 seconds.

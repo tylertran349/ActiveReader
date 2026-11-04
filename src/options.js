@@ -8,8 +8,10 @@
   let settings = null;
   let saveTimer = null;
   let vocabSearchTimer = null;
+  let modelInputTimer = null;
   let pending = {};
   let autofillTried = false;
+  let customModels = [];
 
   init();
 
@@ -24,7 +26,36 @@
     // Text / password
     bindText("api-key", "geminiApiKey");
     bindText("gemini-model", "geminiModel");
+    bindText("custom-base-url", "customApiBaseUrl");
+    bindText("custom-api-key", "customApiKey");
+    bindText("custom-model", "customApiModel");
     bindText("preview-text", null);
+
+    // LLM provider: switching only changes which fields are visible; the
+    // chosen backend is saved immediately.
+    const provider = $("llm-provider");
+    provider.value = settings.llmProvider;
+    provider.addEventListener("change", () => {
+      settings.llmProvider = provider.value;
+      queueSave({ llmProvider: provider.value });
+      syncLlmProvider();
+    });
+
+    // Thinking level is populated from the model and saved explicitly.
+    $("custom-thinking-level").addEventListener("change", () => {
+      queueSave({ customThinkingLevel: $("custom-thinking-level").value });
+    });
+    $("custom-model").addEventListener("change", () => {
+      syncCustomThinking(settings.customApiModel, true);
+    });
+    // Update the thinking-level list as the user types a known model ID,
+    // without waiting for the field to lose focus.
+    $("custom-model").addEventListener("input", () => {
+      clearTimeout(modelInputTimer);
+      modelInputTimer = setTimeout(() => {
+        syncCustomThinking(settings.customApiModel, false);
+      }, 200);
+    });
 
     // Selects
     bindSelect("target-lang", "targetLang");
@@ -80,13 +111,19 @@
     sites.addEventListener("change", () => queueSave({ disabledSites: parseSites(sites.value) }));
 
     syncSiteAccess();
+    syncLlmProvider();
+    syncCustomThinking(settings.customApiModel);
 
     // Buttons
-    $("toggle-key").addEventListener("click", toggleKey);
-    $("test-gemini").addEventListener("click", testGemini);
-    $("fetch-models").addEventListener("click", fetchModels);
+    $("toggle-key").addEventListener("click", () => toggleKey("api-key", "toggle-key"));
+    $("toggle-custom-key").addEventListener("click", () => toggleKey("custom-api-key", "toggle-custom-key"));
+    $("test-gemini").addEventListener("click", testAI);
+    $("test-custom").addEventListener("click", testAI);
+    $("fetch-models").addEventListener("click", () => fetchModels("gemini"));
+    $("fetch-custom-models").addEventListener("click", () => fetchModels("custom"));
     $("preview").addEventListener("click", previewVoice);
     $("api-key").addEventListener("change", maybeAutofillModel);
+    $("custom-api-key").addEventListener("change", maybeAutofillModel);
     $("reset-all").addEventListener("click", resetAll);
     $("vocab-search").addEventListener("input", () => {
       clearTimeout(vocabSearchTimer);
@@ -104,6 +141,7 @@
     $("open-update-page").addEventListener("click", () => send({ type: AR.MSG.OPEN_UPDATE_PAGE }));
 
     maybeAutofillModel();
+    refreshCustomThinkingFromCache();
     await renderUpdateStatus();
     await renderVocab();
     chrome.storage.onChanged.addListener((changes, area) => {
@@ -172,6 +210,72 @@
     if (field) field.hidden = settings.siteAccess !== "selected";
   }
 
+  /* Show the field group for the selected LLM backend. */
+  function syncLlmProvider() {
+    const custom = settings.llmProvider === "custom";
+    $("gemini-fields").hidden = custom;
+    $("custom-fields").hidden = !custom;
+  }
+
+  /* Prefer capabilities from the fetched model list, then the built-in table. */
+  function resolveCustomThinking(modelId) {
+    const id = String(modelId || "").trim();
+    const row = customModels.find((m) => String(m.id || "").toLowerCase() === id.toLowerCase());
+    if (row) {
+      return {
+        levels: row.thinkingLevels || [],
+        default: row.defaultThinkingLevel || ""
+      };
+    }
+    return AR.getThinkingLevels(id);
+  }
+
+  /* Fill the thinking-level dropdown from the model's capabilities. `info` lets
+   * a freshly fetched model row supply levels that are not in the built-in
+   * table. The model default is selected when there is one. */
+  function syncCustomThinking(modelId, persist, info) {
+    const caps = info || resolveCustomThinking(modelId);
+    const levels = (caps.levels || []).slice();
+    const fallback = caps.default || levels[0] || "";
+    const select = $("custom-thinking-level");
+    const field = $("custom-thinking-field");
+    const note = $("custom-thinking-note");
+
+    select.innerHTML = "";
+    if (!levels.length) {
+      field.hidden = true;
+      if (note) {
+        note.hidden = false;
+        note.textContent = String(modelId || "").trim()
+          ? "This model does not advertise thinking levels; the provider's default is used."
+          : "Enter a model ID to see the thinking levels it supports.";
+      }
+      if (persist && settings.customThinkingLevel) queueSave({ customThinkingLevel: "" });
+      return;
+    }
+
+    field.hidden = false;
+    if (note) {
+      note.hidden = false;
+      note.textContent =
+        "The model's default" +
+        (fallback ? " (" + fallback + ")" : "") +
+        " is selected unless you choose another level.";
+    }
+
+    const current = String(settings.customThinkingLevel || "").toLowerCase();
+    const chosen = levels.indexOf(current) !== -1 ? current : fallback;
+    levels.forEach((level) => {
+      const option = document.createElement("option");
+      option.value = level;
+      option.textContent = level.charAt(0).toUpperCase() + level.slice(1) + (level === fallback ? " (default)" : "");
+      select.appendChild(option);
+    });
+    select.value = chosen;
+    settings.customThinkingLevel = chosen;
+    if (persist && chosen !== current) queueSave({ customThinkingLevel: chosen });
+  }
+
   /* --------------------------------------------------------------- saving */
 
   function queueSave(patch) {
@@ -201,9 +305,9 @@
 
   /* -------------------------------------------------------------- actions */
 
-  function toggleKey() {
-    const input = $("api-key");
-    const btn = $("toggle-key");
+  function toggleKey(inputId, buttonId) {
+    const input = $(inputId);
+    const btn = $(buttonId);
     if (input.type === "password") {
       input.type = "text";
       btn.textContent = "Hide";
@@ -213,25 +317,38 @@
     }
   }
 
-  async function testGemini() {
-    const el = $("test-result");
+  async function testAI() {
+    const custom = settings.llmProvider === "custom";
+    const el = $(custom ? "test-result-custom" : "test-result");
+    const providerName = custom ? "the custom API" : "Gemini";
+
     el.textContent = "Testing…";
     el.className = "test-result";
     await flush();
     const res = await send({ type: AR.MSG.TEST_GEMINI });
     if (res && res.ok) {
-      el.innerHTML = AR.icon("check_circle") + AR.escapeHtml('Connected. Gemini said: "' + res.reply + '"');
+      el.innerHTML = AR.icon("check_circle") + AR.escapeHtml('Connected. ' + providerName + ' said: "' + res.reply + '"');
       el.className = "test-result ok";
     } else {
-      el.innerHTML = AR.icon("error") + AR.escapeHtml((res && res.error) || "Could not reach Gemini.");
+      el.innerHTML = AR.icon("error") + AR.escapeHtml((res && res.error) || "Could not reach " + providerName + ".");
       el.className = "test-result error";
     }
   }
 
-  async function fetchModels() {
-    const btn = $("fetch-models");
-    const box = $("model-suggestions");
+  async function fetchModels(mode) {
+    const custom = mode === "custom";
+    const btn = $(custom ? "fetch-custom-models" : "fetch-models");
+    const box = $(custom ? "custom-model-suggestions" : "model-suggestions");
     const label = btn.textContent;
+
+    // The backend uses the saved provider, so make sure the clicked mode is
+    // the active one before asking for its model list.
+    if (settings.llmProvider !== mode) {
+      settings.llmProvider = mode;
+      $("llm-provider").value = mode;
+      queueSave({ llmProvider: mode });
+      syncLlmProvider();
+    }
 
     btn.disabled = true;
     btn.textContent = "Loading…";
@@ -244,36 +361,56 @@
     btn.textContent = label;
 
     if (!res || !res.ok) {
-      showChipsNote((res && res.error) || "Could not fetch models.", true);
+      showChipsNote((res && res.error) || "Could not fetch models.", true, box);
       return;
     }
 
     const models = res.models || [];
     if (!models.length) {
-      showChipsNote("Your key has no models that support quiz generation.", false);
+      showChipsNote("No models were returned by this provider.", false, box);
       return;
     }
 
     autofillTried = true;
-    renderModelChips(models);
+    if (custom) customModels = models;
+    renderModelChips(models, mode);
+
+    // If the current model is in the fresh list, refresh its levels from the
+    // metadata the provider just returned.
+    if (custom) {
+      const current = models.find((m) => m.id === settings.customApiModel);
+      if (current) {
+        syncCustomThinking(current.id, false, {
+          levels: current.thinkingLevels || [],
+          default: current.defaultThinkingLevel || ""
+        });
+      }
+    }
   }
 
-  function showChipsNote(text, isError) {
-    const box = $("model-suggestions");
-    box.textContent = "";
+  function showChipsNote(text, isError, box) {
+    const target = box || $("model-suggestions");
+    target.textContent = "";
     const note = document.createElement("span");
     note.className = "chips-note" + (isError ? " error" : "");
     note.innerHTML = (isError ? AR.icon("error") : "") + AR.escapeHtml(text);
-    box.appendChild(note);
+    target.appendChild(note);
   }
 
   /* Render the live model list as datalist options + clickable chips. */
-  function renderModelChips(models) {
-    $("model-list").innerHTML = models
+  function renderModelChips(models, mode) {
+    const custom = mode === "custom";
+    if (custom) customModels = models;
+    const listId = custom ? "custom-model-list" : "model-list";
+    const boxId = custom ? "custom-model-suggestions" : "model-suggestions";
+    const inputId = custom ? "custom-model" : "gemini-model";
+    const settingKey = custom ? "customApiModel" : "geminiModel";
+
+    $(listId).innerHTML = models
       .map((m) => `<option value="${AR.escapeHtml(m.id)}"></option>`)
       .join("");
 
-    const box = $("model-suggestions");
+    const box = $(boxId);
     box.textContent = "";
 
     models.forEach((m) => {
@@ -283,10 +420,15 @@
       chip.textContent = m.id;
       chip.title = m.displayName || m.id;
       chip.addEventListener("click", () => {
-        const input = $("gemini-model");
-        input.value = m.id;
-        settings.geminiModel = m.id;
-        queueSave({ geminiModel: m.id });
+        $(inputId).value = m.id;
+        settings[settingKey] = m.id;
+        queueSave({ [settingKey]: m.id });
+        if (custom) {
+          syncCustomThinking(m.id, true, {
+            levels: m.thinkingLevels || [],
+            default: m.defaultThinkingLevel || ""
+          });
+        }
         showStatus("Saved", "check_circle");
       });
       box.appendChild(chip);
@@ -297,8 +439,9 @@
    * so a new user can generate a quiz without touching the model field. */
   async function maybeAutofillModel() {
     if (autofillTried) return;
-    if (String(settings.geminiModel || "").trim()) return;
-    if (!($("api-key").value || "").trim()) return;
+    const custom = settings.llmProvider === "custom";
+    if (String((custom ? settings.customApiModel : settings.geminiModel) || "").trim()) return;
+    if (!String((custom ? settings.customApiKey : settings.geminiApiKey) || "").trim()) return;
 
     autofillTried = true;
     await flush();
@@ -309,14 +452,42 @@
       return;
     }
 
-    const id = pickDefaultModel(res.models);
-    if (!id) return;
+    const chosen = custom ? res.models[0] : { id: pickDefaultModel(res.models) };
+    if (!chosen || !chosen.id) return;
 
-    $("gemini-model").value = id;
-    settings.geminiModel = id;
-    await AR.saveSettings({ geminiModel: id });
+    const inputId = custom ? "custom-model" : "gemini-model";
+    const settingKey = custom ? "customApiModel" : "geminiModel";
+    $(inputId).value = chosen.id;
+    settings[settingKey] = chosen.id;
+    await AR.saveSettings({ [settingKey]: chosen.id });
+
+    if (custom) {
+      syncCustomThinking(chosen.id, true, {
+        levels: chosen.thinkingLevels || [],
+        default: chosen.defaultThinkingLevel || ""
+      });
+    }
     showStatus("Model picked", "check_circle");
-    renderModelChips(res.models);
+    renderModelChips(res.models, custom ? "custom" : "gemini");
+  }
+
+  /* On reload, recover provider-advertised thinking levels for a custom model
+   * that is not in the built-in table. Uses the cached model list when it is
+   * still fresh. */
+  async function refreshCustomThinkingFromCache() {
+    if (settings.llmProvider !== "custom") return;
+    if (!String(settings.customApiBaseUrl || "").trim() || !String(settings.customApiModel || "").trim()) return;
+    if (AR.getThinkingLevels(settings.customApiModel).levels.length) return;
+
+    const res = await send({ type: AR.MSG.LIST_MODELS });
+    if (!res || !res.ok) return;
+    customModels = res.models || [];
+    const current = customModels.find((m) => m.id === settings.customApiModel);
+    if (!current) return;
+    syncCustomThinking(current.id, false, {
+      levels: current.thinkingLevels || [],
+      default: current.defaultThinkingLevel || ""
+    });
   }
 
   /* Heuristic: prefer a recent "flash" model, avoid lite/preview/experimental. */
@@ -346,16 +517,18 @@
       provider: settings.ttsProvider
     });
     if (!res || !res.ok) {
-      const el = $("test-result");
+      const el = $(settings.llmProvider === "custom" ? "test-result-custom" : "test-result");
       el.innerHTML = AR.icon("error") + AR.escapeHtml((res && res.error) || "Playback failed.");
       el.className = "test-result error";
     }
   }
 
   async function resetAll() {
-    if (!confirm("Reset all ActiveReader settings to their defaults?\n\nYour Gemini API key is kept.")) return;
-    const keepKey = settings.geminiApiKey;
-    const defaults = Object.assign({}, AR.DEFAULTS, { geminiApiKey: keepKey });
+    if (!confirm("Reset all ActiveReader settings to their defaults?\n\nYour API keys are kept.")) return;
+    const defaults = Object.assign({}, AR.DEFAULTS, {
+      geminiApiKey: settings.geminiApiKey,
+      customApiKey: settings.customApiKey
+    });
     await AR.saveSettings(defaults);
     settings = await AR.getSettings();
     location.reload();
@@ -518,7 +691,7 @@
   /* -------------------------------------------------------- backup/restore */
 
   /* One file with everything the reader cares about, so it can be restored
-   * after a full profile clean. Contains the Gemini API key in plain text. */
+   * after a full profile clean. Contains the API keys in plain text. */
   async function exportBackup() {
     const current = await AR.getSettings();
     const savedWords = await AR.getSavedWords();
