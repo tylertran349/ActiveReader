@@ -103,7 +103,15 @@
     .ar-icon{display:inline-block;width:1.15em;height:1.15em;flex:none;vertical-align:-0.19em;fill:currentColor;pointer-events:none}
     .ar-panel{display:none;flex-direction:column;width:384px;max-height:70vh;background:var(--ar-bg);color:var(--ar-fg);border:1px solid var(--ar-border);border-radius:16px;box-shadow:var(--ar-shadow);overflow:hidden;font-size:14px}
     .ar-panel.open{display:flex}
-    .ar-resize{position:absolute;right:0;bottom:0;width:20px;height:20px;cursor:nwse-resize;color:var(--ar-muted);opacity:.65;touch-action:none}
+    .ar-resize-handle{position:absolute;touch-action:none;background:transparent}
+    .ar-resize-handle[data-dir="n"]{top:0;left:10px;right:10px;height:6px;cursor:ns-resize;z-index:5}
+    .ar-resize-handle[data-dir="s"]{bottom:0;left:10px;right:10px;height:6px;cursor:ns-resize;z-index:5}
+    .ar-resize-handle[data-dir="w"]{left:0;top:10px;bottom:10px;width:6px;cursor:ew-resize;z-index:5}
+    .ar-resize-handle[data-dir="e"]{right:0;top:10px;bottom:10px;width:6px;cursor:ew-resize;z-index:5}
+    .ar-resize-handle[data-dir="nw"]{top:0;left:0;width:12px;height:12px;cursor:nwse-resize;z-index:6}
+    .ar-resize-handle[data-dir="ne"]{top:0;right:0;width:12px;height:12px;cursor:nesw-resize;z-index:6}
+    .ar-resize-handle[data-dir="sw"]{bottom:0;left:0;width:12px;height:12px;cursor:nesw-resize;z-index:6}
+    .ar-resize-handle[data-dir="se"]{bottom:0;right:0;width:12px;height:12px;cursor:nwse-resize;z-index:6}
   `;
 
   function mk(tag, className, text) {
@@ -206,11 +214,14 @@
     bodyEl = mk("div", "ar-body");
     panelEl.appendChild(bodyEl);
 
-    /* Corner grip used to resize the panel by dragging. */
-    const resizeHandle = mk("div", "ar-resize");
-    resizeHandle.title = "Drag to resize";
-    resizeHandle.setAttribute("aria-hidden", "true");
-    panelEl.appendChild(resizeHandle);
+    /* Invisible handles on every side and corner used to resize the panel. */
+    ["n", "s", "w", "e", "nw", "ne", "sw", "se"].forEach((dir) => {
+      const h = mk("div", "ar-resize-handle");
+      h.dataset.dir = dir;
+      h.title = "Resize";
+      h.setAttribute("aria-hidden", "true");
+      panelEl.appendChild(h);
+    });
 
     shadow.appendChild(toolbarEl);
     shadow.appendChild(panelEl);
@@ -253,7 +264,7 @@
     host.style.setProperty("--ar-accent-2", accent.b);
   }
 
-  /* Apply a saved panel size (from dragging the resize grip), clamped to the
+  /* Apply a saved panel size (from dragging a resize handle), clamped to the
    * current viewport. A zero means "use the default / fit the content". */
   function applyPanelSize() {
     if (!panelEl) return;
@@ -1289,8 +1300,9 @@
   }
 
   function onShadowMouseDown(e) {
-    if (e.target.closest(".ar-resize")) {
-      beginResize(e);
+    const resizeHandle = e.target.closest(".ar-resize-handle");
+    if (resizeHandle) {
+      beginResize(e, resizeHandle.dataset.dir || "se");
       return;
     }
     if (e.target.closest(".ar-toolbar, .ar-head, .ar-tabs, .ar-tab")) {
@@ -1351,16 +1363,22 @@
 
   /* --------------------------------------------------------------- resize */
 
-  function beginResize(e) {
+  function beginResize(e, dir) {
     if (!panelEl) return;
     const r = panelEl.getBoundingClientRect();
+    /* Snapshot both edges: the corner opposite the handle stays fixed,
+     * so top/left drags have to move the panel as well as its size.
+     * Anchoring on the far edge keeps sizes valid even at the minimum. */
     resizeState = {
+      dir: dir || "se",
       x: e.clientX,
       y: e.clientY,
       w: r.width,
       h: r.height,
       left: r.left,
-      top: r.top
+      top: r.top,
+      right: r.right,
+      bottom: r.bottom
     };
     /* Pin the current size, then lift the CSS caps so the panel can grow
      * beyond its defaults. Pinning first avoids a jump on a bare click. */
@@ -1376,12 +1394,42 @@
 
   function onResizeMove(e) {
     if (!resizeState || !panelEl) return;
-    const maxW = Math.max(PANEL_MIN_W, window.innerWidth - resizeState.left - 8);
-    const maxH = Math.max(PANEL_MIN_H, window.innerHeight - resizeState.top - 8);
-    const w = clamp(resizeState.w + (e.clientX - resizeState.x), PANEL_MIN_W, maxW);
-    const h = clamp(resizeState.h + (e.clientY - resizeState.y), PANEL_MIN_H, maxH);
+    const s = resizeState;
+    const dx = e.clientX - s.x;
+    const dy = e.clientY - s.y;
+    let w = s.w;
+    let h = s.h;
+    let left = s.left;
+    let top = s.top;
+
+    /* Width: an east edge stretches the panel; a west edge moves the left
+     * edge while the right side stays put. Clamp the new size between the
+     * minimum and the viewport so the panel never leaves the screen. */
+    if (s.dir.indexOf("e") !== -1) {
+      const maxW = Math.max(PANEL_MIN_W, window.innerWidth - 8 - s.left);
+      w = clamp(s.w + dx, PANEL_MIN_W, maxW);
+    } else if (s.dir.indexOf("w") !== -1) {
+      const maxW = Math.max(PANEL_MIN_W, s.right - 8);
+      w = clamp(s.w - dx, PANEL_MIN_W, maxW);
+      left = s.right - w;
+    }
+
+    if (s.dir.indexOf("s") !== -1) {
+      const maxH = Math.max(PANEL_MIN_H, window.innerHeight - 8 - s.top);
+      h = clamp(s.h + dy, PANEL_MIN_H, maxH);
+    } else if (s.dir.indexOf("n") !== -1) {
+      const maxH = Math.max(PANEL_MIN_H, s.bottom - 8);
+      h = clamp(s.h - dy, PANEL_MIN_H, maxH);
+      top = s.bottom - h;
+    }
+
+    /* Handles for a pure edge keep the other axis untouched. The inline
+     * size/position also replaces the CSS default caps, so clamp them here:
+     * width is at least the minimum and the panel stays on screen. */
     panelEl.style.width = Math.round(w) + "px";
     panelEl.style.height = Math.round(h) + "px";
+    if (left !== s.left) panelEl.style.left = Math.round(left) + "px";
+    if (top !== s.top) panelEl.style.top = Math.round(top) + "px";
   }
 
   function endResize() {

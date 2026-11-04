@@ -81,7 +81,7 @@ API is included by default.
 2. A small menu appears next to the selection with **Translate**, **Listen**,
    **Quiz**, **Save** and **Close**.
 3. Results open in the panel. Switch between the **Translate**, **Audio** and
-   **Quiz** tabs, drag the panel by its header to move it, drag the bottom-right
+   **Quiz** tabs, drag the panel by its header to move it, drag any edge or
    corner to resize it, and press `Esc` to close. The panel remembers its size.
 
 You can also right-click a selection and pick an ActiveReader action.

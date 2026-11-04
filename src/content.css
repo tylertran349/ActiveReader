@@ -151,35 +151,83 @@
   display: flex;
 }
 
-/* Corner grip: drag to resize the panel. */
-.ar-resize {
+/* Invisible resize handles: 4 edges + 4 corners. No visible grip.
+ * Handles sit just inside the panel edges so they are not clipped
+ * by `overflow: hidden`. Corners are created last in the DOM and get
+ * a higher z-index so they win over the edge strips where they overlap. */
+.ar-resize-handle {
   position: absolute;
-  right: 0;
-  bottom: 0;
-  width: 20px;
-  height: 20px;
-  cursor: nwse-resize;
-  color: var(--ar-muted);
-  opacity: 0.65;
   touch-action: none;
-  z-index: 2;
+  z-index: 5;
+  background: transparent;
 }
 
-.ar-resize::before {
-  content: "";
-  position: absolute;
-  right: 4px;
-  bottom: 4px;
-  width: 10px;
-  height: 10px;
-  border-right: 2px solid currentColor;
-  border-bottom: 2px solid currentColor;
-  border-bottom-right-radius: 4px;
+.ar-resize-handle[data-dir="n"] {
+  top: 0;
+  left: 10px;
+  right: 10px;
+  height: 6px;
+  cursor: ns-resize;
 }
 
-.ar-resize:hover {
-  opacity: 1;
-  color: var(--ar-accent);
+.ar-resize-handle[data-dir="s"] {
+  bottom: 0;
+  left: 10px;
+  right: 10px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.ar-resize-handle[data-dir="w"] {
+  left: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.ar-resize-handle[data-dir="e"] {
+  right: 0;
+  top: 10px;
+  bottom: 10px;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.ar-resize-handle[data-dir="nw"] {
+  top: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+  z-index: 6;
+}
+
+.ar-resize-handle[data-dir="ne"] {
+  top: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nesw-resize;
+  z-index: 6;
+}
+
+.ar-resize-handle[data-dir="sw"] {
+  bottom: 0;
+  left: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nesw-resize;
+  z-index: 6;
+}
+
+.ar-resize-handle[data-dir="se"] {
+  bottom: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  cursor: nwse-resize;
+  z-index: 6;
 }
 
 .ar-head {
