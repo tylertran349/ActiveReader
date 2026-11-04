@@ -41,6 +41,9 @@
   let defineEl = null;
   let defineToken = 0;
   let defineTarget = null; // { word, x, y } the popup is anchored to
+  /* The word from the previous click. Definitions open on the second click
+   * on the same word, so a stray click while reading does not pop anything up. */
+  let pendingWordClick = null; // { node, word, offset }
   /* Small per-page cache so re-clicking a word does not re-hit the network. */
   const defineCache = new Map();
 
@@ -1350,17 +1353,14 @@
 
   function onWordClick(e) {
     if (!settings.clickDefine || !isActiveSite()) return;
-    if (isInsideUi(e) || e.button) return;
-
-    /* A drag-selection ends with a mouseup+click too. Never treat a click
-     * that leaves real selected text behind as a word click. */
-    if (window.getSelection && String(window.getSelection() || "").trim().length > 1) {
-      hideDefine();
+    if (isInsideUi(e) || e.button) {
+      /* Clicking inside our own UI neither opens nor arms a lookup. */
       return;
     }
 
     const hit = wordAtPoint(e.clientX, e.clientY);
     if (!hit) {
+      pendingWordClick = null;
       hideDefine();
       return;
     }
@@ -1368,12 +1368,43 @@
     const text = hit.node.textContent || "";
     const word = wordAroundOffset(text, hit.offset);
     if (!word || word.length < 2 || word.length > 40) {
+      pendingWordClick = null;
       hideDefine();
       return;
     }
 
     const rect = wordRectAt(hit.node, hit.offset, word);
     if (!rect) {
+      pendingWordClick = null;
+      hideDefine();
+      return;
+    }
+
+    /* A drag-selection ends with a mouseup+click too. Never treat a click
+     * that leaves real selected text behind as a word click. A native
+     * double-click selects just the clicked word (possibly with trailing
+     * punctuation), which is allowed here so it can open the popup. */
+    const selected = window.getSelection ? String(window.getSelection() || "").trim() : "";
+    const selectedIsWord =
+      selected.length <= 1 ||
+      (selected.toLowerCase().includes(word.toLowerCase()) && selected.length <= word.length + 3);
+    if (!selectedIsWord) {
+      pendingWordClick = null;
+      hideDefine();
+      return;
+    }
+
+    const pending = pendingWordClick;
+    pendingWordClick = null;
+    const sameWord =
+      pending &&
+      pending.node === hit.node &&
+      pending.word === word &&
+      Math.abs(pending.offset - hit.offset) <= word.length + 2;
+
+    if (!sameWord) {
+      /* First click: remember the word but keep the popup closed. */
+      pendingWordClick = { node: hit.node, word, offset: hit.offset };
       hideDefine();
       return;
     }

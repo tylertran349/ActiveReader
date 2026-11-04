@@ -159,7 +159,7 @@
     customThinkingLevel: "",
 
     // Languages
-    // Whether clicking a word shows a small popup with its definition.
+    // Whether clicking a word twice shows a small popup with its definition.
     // Off by default: the popup changes how every page reacts to clicks, so
     // the reader opts in from Settings → Reading & selection.
     clickDefine: false,

@@ -101,7 +101,7 @@ Open settings from the panel's ⚙ button, the popup, or `chrome://extensions`.
 - **Languages** — the language you are learning and your own language, used for translations, quiz explanations and the AI model's answer feedback.
 - **Translation** — Google Translate or your AI provider (automatic fallback to the other).
 - **Text to speech** — Google Translate voice or browser voice, plus speed, pitch and a preview box.
-- **Reading & selection** — floating toolbar on/off, auto-translate, click-a-word definitions, auto-save lookups, minimum/maximum selection size, and where the extension runs: on **every site except the ones you block**, or **only on the sites you allow** (per-site allow and block lists).
+- **Reading & selection** — floating toolbar on/off, auto-translate, double-click-a-word definitions, auto-save lookups, minimum/maximum selection size, and where the extension runs: on **every site except the ones you block**, or **only on the sites you allow** (per-site allow and block lists).
 - **Quiz defaults** — which question types to generate, difficulty, number of questions, question language and whether to include explanations.
 - **Appearance** — light/dark/system theme and an accent colour.
 - **Updates** — current version, a **Check for updates** button, an automatic 12-hour check, an optional notification, and **Update now**, which downloads the latest files from this repo into your extension folder and reloads the extension.
