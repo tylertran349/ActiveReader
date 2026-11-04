@@ -36,6 +36,13 @@
   let dragState = null;
   let resizeState = null;
 
+  /* Click-a-word popup state. One popup element, reused for every word. */
+  let defineEl = null;
+  let defineToken = 0;
+  let defineTarget = null; // { word, x, y } the popup is anchored to
+  /* Small per-page cache so re-clicking a word does not re-hit the network. */
+  const defineCache = new Map();
+
   /* Bumped whenever the highlighted text changes, so responses that arrive
    * after the user selected something else are discarded. */
   let selectionToken = 0;
@@ -79,9 +86,13 @@
     await ensureUi();
     document.addEventListener("mouseup", onSelectionEvent, true);
     document.addEventListener("keyup", onSelectionEvent, true);
+    document.addEventListener("click", onWordClick, true);
     document.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("scroll", onWindowScroll, true);
-    window.addEventListener("resize", hideToolbar);
+    window.addEventListener("resize", () => {
+      hideToolbar();
+      hideDefine();
+    });
     chrome.runtime.onMessage.addListener(onRuntimeMessage);
     try {
       chrome.storage.onChanged.addListener(onStorageChanged);
@@ -112,6 +123,22 @@
     .ar-resize-handle[data-dir="ne"]{top:0;right:0;width:12px;height:12px;cursor:nesw-resize;z-index:6}
     .ar-resize-handle[data-dir="sw"]{bottom:0;left:0;width:12px;height:12px;cursor:nesw-resize;z-index:6}
     .ar-resize-handle[data-dir="se"]{bottom:0;right:0;width:12px;height:12px;cursor:nwse-resize;z-index:6}
+    .ar-define{position:fixed;display:none;pointer-events:auto;z-index:5;max-width:300px;padding:10px 12px;
+      background:var(--ar-bg);color:var(--ar-fg);border:1px solid var(--ar-border);border-radius:12px;
+      box-shadow:var(--ar-shadow);font-family:sans-serif;font-size:13px;line-height:1.45}
+    .ar-define.open{display:block}
+    .ar-define-head{display:flex;align-items:center;gap:8px;margin-bottom:2px}
+    .ar-define-word{font-weight:700;font-size:14px;word-break:break-word}
+    .ar-define-pos{flex:none;padding:1px 7px;border-radius:999px;background:var(--ar-field);color:var(--ar-muted);
+      font-size:10.5px;font-weight:700;text-transform:uppercase}
+    .ar-define-close{all:unset;flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;
+      margin-left:auto;border-radius:6px;color:var(--ar-muted);cursor:pointer;font-size:12px}
+    .ar-define-meaning{color:var(--ar-fg);white-space:pre-wrap;word-break:break-word}
+    .ar-define-example{margin-top:6px;padding-left:8px;border-left:2px solid var(--ar-accent);color:var(--ar-muted);font-style:italic}
+    .ar-define-note{margin-top:7px;font-size:11px;color:var(--ar-muted)}
+    .ar-define-loading{display:flex;align-items:center;gap:8px;margin-top:4px;color:var(--ar-muted);font-size:12.5px}
+    .ar-define-loading .ar-spinner{width:13px;height:13px}
+    .ar-define-error{margin-top:4px;color:var(--ar-danger);font-size:12.5px}
   `;
 
   function mk(tag, className, text) {
@@ -355,13 +382,16 @@
 
   function onKeyDown(e) {
     if (e.key !== "Escape") return;
+    hideDefine();
     hideToolbar();
     if (panelEl && panelEl.classList.contains("open")) closePanel();
   }
 
-  /* Hide the toolbar on page scroll, but not when scrolling inside our panel. */
+  /* Hide the toolbar and the word popup on page scroll, but not when
+   * scrolling inside our panel. */
   function onWindowScroll(e) {
     if (isInsideUi(e)) return;
+    hideDefine();
     hideToolbar();
   }
 
@@ -1199,7 +1229,288 @@
     }
   }
 
-  /* ------------------------------------------------------------- events */
+  /* ------------------------------------------------- click a word popup */
+
+  /* Whether the clicked point sits on a plain word worth looking up. Skips
+   * links, buttons and inputs so the popup never fights the page's own UI,
+   * and empty clicks on margins or images. Returns the text node + character
+   * offset the click landed on, or null. */
+  function wordAtPoint(x, y) {
+    let el = null;
+    try {
+      el = document.elementFromPoint(x, y);
+    } catch (e) {
+      return null;
+    }
+    if (!el) return null;
+    if (el.closest) {
+      const nz = el.closest(
+        'a[href], button, input, textarea, select, label, summary, [role="button"], [role="option"], [role="tab"], [role="menuitem"], [contenteditable], iframe, video, audio, embed, object, svg, active-reader-root'
+      );
+      if (nz) return null;
+    }
+
+    /* Chrome resolves the exact text node + offset under the pointer, which
+     * handles wrapped text and letter-spaced runs better than any manual
+     * geometry. Fall back to a per-node scan when it is unavailable. */
+    let node = null;
+    let offset = 0;
+    try {
+      if (document.caretRangeFromPoint) {
+        const r = document.caretRangeFromPoint(x, y);
+        if (r && r.startContainer && r.startContainer.nodeType === Node.TEXT_NODE) {
+          node = r.startContainer;
+          offset = r.startOffset;
+        }
+      }
+    } catch (e) {
+      /* fall through to the manual scan */
+    }
+    if (node) return { node, offset };
+
+    if (el.nodeType === Node.TEXT_NODE) {
+      return { node: el, offset: offsetAtPoint(el, x) };
+    }
+
+    /* Text is often wrapped: the element at the point is the containing <p>
+     * or <span>. Walk its text-node descendants to find the exact line box. */
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let candidate = walker.nextNode();
+    while (candidate) {
+      let hit = false;
+      try {
+        const range = document.createRange();
+        range.selectNodeContents(candidate);
+        const rects = range.getClientRects();
+        for (const rect of rects) {
+          if (rect.width && rect.height && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom) {
+            hit = true;
+            break;
+          }
+        }
+      } catch (e) {
+        /* unrenderable node */
+      }
+      if (hit) {
+        return { node: candidate, offset: offsetAtPoint(candidate, x) };
+      }
+      candidate = walker.nextNode();
+    }
+    return null;
+  }
+
+  /* Character index inside a text node for the given x coordinate. Binary
+   * searches over per-character client ranges so wrapped words stay exact. */
+  function offsetAtPoint(node, x) {
+    const text = node.textContent || "";
+    let lo = 0;
+    let hi = text.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      pointRightOf(node, mid) <= x ? (lo = mid + 1) : (hi = mid);
+    }
+    return lo > 0 ? lo - 1 : 0;
+  }
+
+  function pointRightOf(node, index) {
+    try {
+      const r = document.createRange();
+      r.setStart(node, Math.max(0, index - 1));
+      r.setEnd(node, Math.max(0, index));
+      const rect = r.getBoundingClientRect();
+      return rect && rect.width ? rect.right : -Infinity;
+    } catch (e) {
+      return -Infinity;
+    }
+  }
+
+  /* Whole word around a character offset: letters/digits/accents, plus "'"
+   * and "-" glued to letters ("don't", "mother-in-law"). */
+  function wordAroundOffset(text, offset) {
+    const isWordChar = (ch) => /[\p{L}\p{N}'’-]/u.test(ch);
+    let start = Math.min(offset, Math.max(0, text.length - 1));
+    let end = start;
+    while (start > 0 && isWordChar(text[start - 1])) start--;
+    while (end < text.length && isWordChar(text[end])) end++;
+    if (start === end) return null;
+
+    let word = text.slice(start, end);
+    /* Interior apostrophes/hyphens stay; leading/trailing ones are cut. */
+    word = word.replace(/^['’-]+|['’-]+$/g, "");
+    if (!word || !/\p{L}/u.test(word)) return null;
+    return word;
+  }
+
+  function onWordClick(e) {
+    if (!settings.clickDefine || !isActiveSite()) return;
+    if (isInsideUi(e) || e.button) return;
+
+    /* A drag-selection ends with a mouseup+click too. Never treat a click
+     * that leaves real selected text behind as a word click. */
+    if (window.getSelection && String(window.getSelection() || "").trim().length > 1) {
+      hideDefine();
+      return;
+    }
+
+    const hit = wordAtPoint(e.clientX, e.clientY);
+    if (!hit) {
+      hideDefine();
+      return;
+    }
+
+    const text = hit.node.textContent || "";
+    const word = wordAroundOffset(text, hit.offset);
+    if (!word || word.length < 2 || word.length > 40) {
+      hideDefine();
+      return;
+    }
+
+    const rect = wordRectAt(hit.node, hit.offset, word);
+    if (!rect) {
+      hideDefine();
+      return;
+    }
+
+    /* The event still reaches the page untouched — the popup only *adds*
+     * something to look at; a click on a word keeps its normal behaviour. */
+    showDefine(word, rect, contextAroundWord(text, hit.offset, word));
+  }
+
+  function showDefine(word, rect, context) {
+    defineToken++;
+    const token = defineToken;
+    defineTarget = { word, x: rect.left + rect.width / 2, y: rect.top };
+    ensureDefineEl().classList.add("open");
+    renderDefineLoading(word);
+    positionDefine();
+
+    const key = settings.baseLang + "\u0000" + word.toLowerCase();
+    const cached = defineCache.get(key);
+    if (cached) {
+      renderDefine(word, cached);
+      positionDefine();
+      return;
+    }
+
+    send({ type: MSG.DEFINE, word, context }).then((res) => {
+      /* The reader clicked another word (or Esc) while we were waiting. */
+      if (token !== defineToken) return;
+      if (res && res.ok) {
+        const entry = {
+          meaning: res.meaning,
+          partOfSpeech: res.partOfSpeech,
+          example: res.example,
+          fallback: !!res.fallback
+        };
+        cacheSet(defineCache, key, entry, 120);
+        renderDefine(word, entry);
+      } else {
+        renderDefineError(word, (res && res.error) || "Could not look up this word.");
+      }
+      if (defineEl && defineTarget) positionDefine();
+    });
+  }
+
+  function ensureDefineEl() {
+    if (defineEl) return defineEl;
+    defineEl = mk("div", "ar-define");
+    defineEl.setAttribute("role", "tooltip");
+    defineEl.setAttribute("aria-live", "polite");
+    shadow.appendChild(defineEl);
+    return defineEl;
+  }
+
+  function renderDefineLoading(word) {
+    setHtml(
+      defineEl,
+      defineHeadHtml(word) +
+        `<div class="ar-define-loading"><span class="ar-spinner"></span> Looking up…</div>`
+    );
+  }
+
+  function defineHeadHtml(word) {
+    return (
+      `<div class="ar-define-head"><span class="ar-define-word">${AR.escapeHtml(word)}</span>` +
+      `<span class="ar-define-close" data-action="define-close" title="Dismiss" role="button" tabindex="0">${AR.icon(
+        "close"
+      )}</span></div>`
+    );
+  }
+
+  function renderDefine(word, entry) {
+    const rtl = AR.isRtl(settings.baseLang) ? " rtl" : "";
+    const pos = entry.partOfSpeech ? `<span class="ar-define-pos">${AR.escapeHtml(entry.partOfSpeech)}</span>` : "";
+    const meaning = entry.meaning
+      ? AR.escapeHtml(entry.meaning)
+      : "No definition found.";
+    const example = entry.example
+      ? `<div class="ar-define-example${rtl}">“${AR.escapeHtml(entry.example)}”</div>`
+      : "";
+    const note = entry.fallback
+      ? `<div class="ar-define-note">Translation only — add an AI API key for richer definitions.</div>`
+      : "";
+    setHtml(defineEl, defineHeadHtml(word) + `<div class="ar-define-meaning${rtl}">${meaning}</div>` + example + note);
+  }
+
+  function renderDefineError(word, error) {
+    setHtml(defineEl, defineHeadHtml(word) + `<div class="ar-define-error">${AR.escapeHtml(error)}</div>`);
+  }
+
+  function positionDefine() {
+    if (!defineEl || !defineTarget) return;
+    const w = defineEl.offsetWidth || 240;
+    const h = defineEl.offsetHeight || 60;
+    const maxW = Math.max(120, window.innerWidth - 16);
+    const width = Math.min(w, maxW);
+    let left = clamp(defineTarget.x - width / 2, 8, Math.max(8, window.innerWidth - width - 8));
+    let top = defineTarget.y - h - 8;
+    /* No room above the word (toolbar users know this pattern): flip below. */
+    if (top < 8) top = clamp(defineTarget.y + 22, 8, Math.max(8, window.innerHeight - h - 8));
+    defineEl.style.left = Math.round(left) + "px";
+    defineEl.style.top = Math.round(top) + "px";
+    if (width !== w) defineEl.style.width = Math.round(width) + "px";
+    else defineEl.style.width = "";
+  }
+
+  function hideDefine() {
+    if (defineEl) defineEl.classList.remove("open");
+    defineTarget = null;
+    defineToken++; /* any in-flight lookup is dropped */
+  }
+
+  /* The on-screen rectangle of one word inside a text node, measured with
+   * per-character ranges. A word wrapped over two lines has two rects; the
+   * last one is the side the reader clicked, so it wins. */
+  function wordRectAt(node, offset, word) {
+    try {
+      const start = Math.max(0, offset - word.length + 1);
+      const range = document.createRange();
+      let best = null;
+      for (let i = start; i < start + word.length; i++) {
+        range.setStart(node, i);
+        range.setEnd(node, i + 1);
+        const rect = range.getBoundingClientRect();
+        if (rect && rect.width && rect.height) best = rect;
+      }
+      return best;
+    } catch (err) {
+      return null;
+    }
+  }
+
+  /* A short window of the surrounding sentence, so a model can pick the right
+   * sense of the word ("bank" by a river vs. a "bank" with tellers). */
+  function contextAroundWord(text, offset, word) {
+    const start = Math.max(0, offset - word.length + 1);
+    const from = Math.max(0, start - 80);
+    const to = Math.min(text.length, start + word.length + 80);
+    return text
+      .slice(from, to)
+      .replace(/\s+/g, " ")
+      .trim();
+  }
+
+  /* ----------------------------------------------------------- events */
 
   function onShadowClick(e) {
     const tabBtn = e.target.closest(".ar-tab");
@@ -1216,6 +1527,10 @@
       case "close":
         hideToolbar();
         closePanel();
+        hideDefine();
+        break;
+      case "define-close":
+        hideDefine();
         break;
       case "settings":
         send({ type: MSG.OPEN_OPTIONS });
@@ -1496,6 +1811,7 @@
       }
       if (badgeEl) badgeEl.textContent = AR.langLabel(settings.targetLang);
       if (!isActiveSite()) {
+        hideDefine();
         hideToolbar();
         closePanel();
       }

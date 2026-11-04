@@ -75,6 +75,7 @@
     // Checkboxes
     bindCheck("show-toolbar", "showToolbar");
     bindCheck("auto-translate", "autoTranslate");
+    bindCheck("click-define", "clickDefine");
     bindCheck("auto-save", "autoSaveLookups");
     bindCheck("quiz-explain", "quizExplain");
     bindCheck("auto-check-updates", "autoCheckUpdates");

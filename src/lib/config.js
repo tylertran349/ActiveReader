@@ -15,7 +15,7 @@
     try {
       return chrome.runtime.getManifest().version;
     } catch (e) {
-      return "1.1.0";
+      return "1.2.0";
     }
   })();
 
@@ -143,6 +143,10 @@
     customThinkingLevel: "",
 
     // Languages
+    // Whether clicking a word shows a small popup with its definition.
+    clickDefine: true,
+    // The language the clicked word is looked up in. Shared with the
+    // Translate and Audio features, so the two cannot drift apart.
     targetLang: "es", // the language being learned
     baseLang: "en", // the learner's own language: explanations, translations & feedback
 
@@ -520,6 +524,7 @@
       ttsProvider: oneOf(r.ttsProvider, ["google", "browser"], d.ttsProvider),
       ttsRate: num(r.ttsRate, d.ttsRate, 0.5, 2),
       ttsPitch: num(r.ttsPitch, d.ttsPitch, 0, 2),
+      clickDefine: bool(r.clickDefine, d.clickDefine),
       showToolbar: bool(r.showToolbar, d.showToolbar),
       autoTranslate: bool(r.autoTranslate, d.autoTranslate),
       minSelectionLength: num(r.minSelectionLength, d.minSelectionLength, 1, 100),
@@ -753,6 +758,11 @@
     return !!AR.RTL_LANGS[base];
   };
 
+  /* Click a single word anywhere on the page and a small popup above it shows
+   * what the word means (a compact dictionary-style note written from the
+   * sentence context). Uses the same AI/translation backend as the quiz. */
+  AR.DEFINE = "ar-define";
+
   /* ------------------------------------------------------------- messages */
 
   /* One place for every runtime message name so contexts cannot drift apart. */
@@ -760,6 +770,7 @@
     PING: "ar-ping",
     COMMAND: "ar-command",
     TRANSLATE: "ar-translate",
+    DEFINE: "ar-define",
     QUIZ: "ar-quiz",
     GRADE: "ar-grade",
     TTS: "ar-tts",

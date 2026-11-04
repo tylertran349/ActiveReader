@@ -11,6 +11,7 @@
     ttsProvider: $("tts-provider"),
     showToolbar: $("show-toolbar"),
     autoTranslate: $("auto-translate"),
+    clickDefine: $("click-define"),
     keyWarning: $("key-warning"),
     addKey: $("add-key"),
     openOptions: $("open-options"),
@@ -40,6 +41,7 @@
     els.ttsProvider.value = settings.ttsProvider;
     els.showToolbar.checked = !!settings.showToolbar;
     els.autoTranslate.checked = !!settings.autoTranslate;
+    els.clickDefine.checked = !!settings.clickDefine;
     const custom = settings.llmProvider === "custom";
     els.keyWarning.hidden = !!String((custom ? settings.customApiKey : settings.geminiApiKey) || "").trim();
 
@@ -48,6 +50,7 @@
     els.ttsProvider.addEventListener("change", () => update({ ttsProvider: els.ttsProvider.value }));
     els.showToolbar.addEventListener("change", () => update({ showToolbar: els.showToolbar.checked }));
     els.autoTranslate.addEventListener("change", () => update({ autoTranslate: els.autoTranslate.checked }));
+    els.clickDefine.addEventListener("change", () => update({ clickDefine: els.clickDefine.checked }));
 
     els.openOptions.addEventListener("click", () => chrome.runtime.openOptionsPage());
     els.addKey.addEventListener("click", () => chrome.runtime.openOptionsPage());

@@ -163,6 +163,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     case MSG.TRANSLATE:
       handleTranslate(msg).then(sendResponse);
       return true;
+    case MSG.DEFINE:
+      handleDefine(msg).then(sendResponse);
+      return true;
     case MSG.QUIZ:
       handleQuiz(msg).then(sendResponse);
       return true;
@@ -1191,6 +1194,112 @@ async function handleGrade(msg) {
   } catch (e) {
     return { ok: false, error: e.message };
   }
+}
+
+/* ------------------------------------------------------------- definitions */
+
+const DEFINE_SCHEMA = {
+  type: "OBJECT",
+  properties: {
+    meaning: { type: "STRING" },
+    partOfSpeech: { type: "STRING" },
+    example: { type: "STRING" }
+  },
+  required: ["meaning"]
+};
+
+/* One-word lookup. Google Translate is the default path (no key, no API
+ * cost): the word is translated in isolation and the detected source
+ * language is shown when it is not the target language. When the
+ * translation engine is set to AI, the model instead writes a short
+ * dictionary-style note in the learner's own language, using the sentence
+ * the word appeared in to pick the right sense (a "bank" by a river is not
+ * a "bank" with tellers). Either route falls back to the other on failure,
+ * so the popup always shows something. */
+async function handleDefine(msg) {
+  const settings = await AR.getSettings();
+  const word = String(msg.word || "").trim();
+  if (!word) return { ok: false, error: "No word to look up." };
+  if (word.length > 64) return { ok: false, error: "That selection is too long for a word lookup." };
+
+  const engine = msg.engine || settings.translationEngine;
+  const context = String(msg.context || "").trim().slice(0, 300);
+
+  if (engine === "gemini") {
+    // AI rule: rich, context-aware definition, if the model is reachable.
+    try {
+      return { ok: true, engine: "gemini", ...(await aiDefine(word, context, settings)) };
+    } catch (e) {
+      try {
+        const res = await googleTranslate(word, "auto", settings.baseLang);
+        return {
+          ok: true,
+          engine: "google",
+          fallback: true,
+          meaning: res.translation,
+          partOfSpeech: "",
+          example: "",
+          detected: res.detected
+        };
+      } catch (e2) {
+        return { ok: false, error: e.message };
+      }
+    }
+  }
+
+  // Default: Google Translate (free, no key). Words are translated in
+  // isolation — googleTranslate() has no notion of sentence context, which is
+  // exactly what keeps these tiny calls cheap.
+  try {
+    const res = await googleTranslate(word, "auto", settings.baseLang);
+    return {
+      ok: true,
+      engine: "google",
+      meaning: res.translation,
+      partOfSpeech: "",
+      example: "",
+      detected: res.detected
+    };
+  } catch (e) {
+    try {
+      return { ok: true, engine: "gemini", fallback: true, ...(await aiDefine(word, context, settings)) };
+    } catch (e2) {
+      return { ok: false, error: e.message };
+    }
+  }
+}
+
+/* The AI route of a word lookup: a compact dictionary-style note written
+ * from the sentence context. Throws on failure so the Google fallback in
+ * handleDefine can run. */
+async function aiDefine(word, context, settings) {
+  const base = AR.langName(settings.baseLang);
+  const target = AR.langName(settings.targetLang);
+
+  const prompt = [
+    `You are a concise ${target} dictionary for someone whose own language is ${base}.`,
+    `The reader clicked the word below while reading.`,
+    context ? `It appeared in this text: «${context}»` : "",
+    ``,
+    `WORD: ${word}`,
+    ``,
+    `Rules:`,
+    `- "meaning": one short definition of THIS occurrence in ${base} (1 sentence, no quotes).`,
+    `- If the word is not ${target} or is a proper noun, a number, or otherwise not worth defining, use "meaning" to give the most useful short gloss anyway (e.g. a translation) rather than a definition.`,
+    `- "partOfSpeech": the part of speech in ${base}, one or two words ("noun", "verb", …). Optional.`,
+    `- "example": skip it unless a tiny example (max 8 words) genuinely helps; otherwise return an empty string.`,
+    `- Reply in JSON only.`
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const raw = await callLLM(prompt, settings, DEFINE_SCHEMA, 0.3, 256);
+  const parsed = parseJsonLoose(raw);
+  return {
+    meaning: String(parsed.meaning || "").trim(),
+    partOfSpeech: String(parsed.partOfSpeech || "").trim(),
+    example: String(parsed.example || "").trim()
+  };
 }
 
 /* ------------------------------------------------------------------ tts */

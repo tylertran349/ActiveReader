@@ -16,6 +16,7 @@ dependencies.
 | 🔊 **Text to speech** | Uses the Google Translate voice by default (natural, no API key). Falls back to the built-in browser voice if Google is unreachable. Long selections are split into chunks automatically. |
 | 🌐 **Translation** | Translates the highlighted text into your own language via Google Translate, with an optional AI engine, and reports the detected source language. Small speaker buttons play the original or the translation aloud. |
 | 🎓 **AI quizzes** | Your chosen AI model generates multiple-choice, short-answer and fill-in-the-blank questions from the selection. Answer them inline and get instant feedback: free-response answers are graded by the model (equivalent wording and small typos count) with a short explanation written in your own language. A **Translate question** button under each question shows it in your own language. Your last quiz stays put when you highlight new text or switch tabs, and if the model returns fewer questions than you asked for, ActiveReader automatically asks again to fill the quiz. |
+| 🖱️ **Click-a-word** | Click **any single word** while reading and a small popup appears right above it with a one-sentence definition written for that word *in context* (so a "bank" by a river is not a "bank" with tellers), plus part of speech, a tiny example, and a speak button. Works with an AI key; without one it falls back to a plain translation. On/off via **Settings → Reading & selection → Show a definition when I click a single word**. |
 | ⭐ **Vocabulary** | Save words/phrases with their translation and source page. Search, export (JSON/CSV) and manage them in settings. |
 | ⬆️ **Update checks** | ActiveReader notices when its own version changes and, optionally, checks this GitHub project for a newer build every 12 hours. When one exists you get a toolbar badge, an optional notification, an in-popup banner and a one-click update page. |
 | ⚙️ **Persistent settings** | API key, languages, voice, quiz defaults, theme and more are stored in Chrome sync storage. |
@@ -83,6 +84,9 @@ API is included by default.
 3. Results open in the panel. Switch between the **Translate**, **Audio** and
    **Quiz** tabs, drag the panel by its header to move it, drag any edge or
    corner to resize it, and press `Esc` to close. The panel remembers its size.
+4. **Click any single word** to see a short definition of it *in context* in a
+   small popup above the word. Click elsewhere or press `Esc` to dismiss it;
+   lookups are cached per page, so re-clicking a word is instant.
 
 You can also right-click a selection and pick an ActiveReader action.
 
@@ -96,7 +100,7 @@ Open settings from the panel's ⚙ button, the popup, or `chrome://extensions`.
 - **Languages** — the language you are learning and your own language, used for translations, quiz explanations and the AI model's answer feedback.
 - **Translation** — Google Translate or your AI provider (automatic fallback to the other).
 - **Text to speech** — Google Translate voice or browser voice, plus speed, pitch and a preview box.
-- **Reading & selection** — floating toolbar on/off, auto-translate, auto-save lookups, minimum/maximum selection size, and where the extension runs: on **every site except the ones you block**, or **only on the sites you allow** (per-site allow and block lists).
+- **Reading & selection** — floating toolbar on/off, auto-translate, click-a-word definitions, auto-save lookups, minimum/maximum selection size, and where the extension runs: on **every site except the ones you block**, or **only on the sites you allow** (per-site allow and block lists).
 - **Quiz defaults** — which question types to generate, difficulty, number of questions, question language and whether to include explanations.
 - **Appearance** — light/dark/system theme and an accent colour.
 - **Updates** — current version, a **Check for updates** button, an automatic 12-hour check, an optional notification, and a page that walks through downloading the latest build.
@@ -154,7 +158,7 @@ icons/                   toolbar + store icons
 tests/config.test.js     unit tests for the shared config helpers
 src/
   background.js          service worker: AI providers, translation, TTS, context menus, update checks
-  content.js             selection toolbar + Translate/Audio/Quiz panel
+  content.js             selection toolbar + Translate/Audio/Quiz panel + click-a-word popup
   content.css            styles for the injected shadow-DOM UI
   offscreen.html/.js     plays Google Translate TTS audio in an extension context
   popup.html/.js/.css    toolbar popup (quick settings + recent vocabulary)
@@ -216,5 +220,7 @@ Translate MP3s and plays them, keeping playback reliable regardless of the page.
 | Toolbar doesn't appear | Reload the page, and check the site is allowed by your site-access settings (not blocked, and listed if you chose "Only the sites I allow"). |
 | No audio | Some voices need a user gesture — click Play. Try switching to the **Browser voice** in settings. |
 | Quiz fails | Check the API key with **Test connection** and confirm the model name is available to your key. |
+| Word popup says "Translation only" | The AI key was unavailable, so a plain translation was shown. Check **Test connection** in settings — with a key the popup gives full definitions. |
+| Word popup doesn't appear | Make sure **Show a definition when I click a single word** is on in settings; the popup skips links, buttons and form fields on purpose. |
 | "Could not reach the extension" | The extension was reloaded; refresh the page. |
 | Translation empty | Try switching the translation engine; both engines fall back to each other automatically. |
