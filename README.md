@@ -81,9 +81,9 @@ API is included by default.
 1. **Highlight some text** on any page.
 2. A small menu appears next to the selection with **Translate**, **Listen**,
    **Quiz**, **Save** and **Close**.
-3. Results open in the panel. Switch between the **Translate**, **Audio** and
-   **Quiz** tabs, drag the panel by its header to move it, drag any edge or
-   corner to resize it, and press `Esc` to close. The panel remembers its size.
+3. Results open in the panel. Switch between the **Translate** and **Quiz**
+   tabs, drag the panel by its header to move it, drag any edge or corner to
+   resize it, and press `Esc` to close. The panel remembers its size.
 4. **Optionally, click any single word** to see a quick lookup of it in a
    small popup above the word. This is off by default; enable it in settings.
    Click elsewhere or press `Esc` to dismiss it; lookups are cached per page,
@@ -170,7 +170,7 @@ icons/                   toolbar + store icons
 tests/config.test.js     unit tests for the shared config helpers
 src/
   background.js          service worker: AI providers, translation, TTS, context menus, update checks
-  content.js             selection toolbar + Translate/Audio/Quiz panel + click-a-word popup
+  content.js             selection toolbar + Translate/Quiz panel + click-a-word popup
   content.css            styles for the injected shadow-DOM UI
   offscreen.html/.js     plays Google Translate TTS audio in an extension context
   popup.html/.js/.css    toolbar popup (quick settings + recent vocabulary)
@@ -231,7 +231,7 @@ Translate MP3s and plays them, keeping playback reliable regardless of the page.
 | Problem | Fix |
 |---|---|
 | Toolbar doesn't appear | Reload the page, and check the site is allowed by your site-access settings (not blocked, and listed if you chose "Only the sites I allow"). |
-| No audio | Some voices need a user gesture — click Play. Try switching to the **Browser voice** in settings. |
+| No audio | Some voices need a user gesture — click the speaker icon next to the selection or translation. Try switching to the **Browser voice** in settings. |
 | Quiz fails | Check the API key with **Test connection** and confirm the model name is available to your key. |
 | Word popup doesn't appear | The feature is off by default - enable **Show a definition when I click a single word twice** in settings; the popup also skips links, buttons and form fields on purpose. Double-click exactly one word, and refresh any tab that was open when the extension was reloaded. |
 | Word popup says "Fallback lookup" | The preferred engine failed, so the other one answered. Check **Test connection** in settings when the AI engine is selected. |

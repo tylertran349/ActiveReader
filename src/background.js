@@ -8,7 +8,6 @@ importScripts("lib/config.js");
 const AR = globalThis.AR;
 const MSG = AR.MSG;
 
-let lastTtsTabId = null;
 let creatingOffscreen = null;
 let offscreenCloseTimer = null;
 
@@ -139,7 +138,7 @@ async function ensureContentScript(tabId) {
 
 /* ---------------------------------------------------------------- router */
 
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || typeof msg.type !== "string") return undefined;
 
   // Messages addressed to the offscreen document are ignored here.
@@ -151,7 +150,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       handleBrowserTts(msg.text, msg.lang).catch(() => {});
     } else if (msg.type === MSG.TTS_STATE) {
       if (msg.state === "ended" || msg.state === "failed") scheduleOffscreenClose();
-      forwardTtsState(msg.state);
     }
     return undefined;
   }
@@ -173,10 +171,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       handleGrade(msg).then(sendResponse);
       return true;
     case MSG.TTS:
-      handleTts(msg, sender).then(sendResponse);
-      return true;
-    case MSG.TTS_STOP:
-      stopTts().then(() => sendResponse({ ok: true }));
+      handleTts(msg).then(sendResponse);
       return true;
     case MSG.SAVE:
       handleSave(msg).then(sendResponse);
@@ -205,11 +200,6 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       return undefined;
   }
 });
-
-function forwardTtsState(state) {
-  if (lastTtsTabId == null) return;
-  chrome.tabs.sendMessage(lastTtsTabId, { type: MSG.TTS_STATE, state }).catch(() => {});
-}
 
 /* -------------------------------------------------------------- updates */
 
@@ -1304,12 +1294,10 @@ async function aiDefine(word, context, settings) {
 
 /* ------------------------------------------------------------------ tts */
 
-async function handleTts(msg, sender) {
+async function handleTts(msg) {
   const settings = await AR.getSettings();
   const text = String(msg.text || "").trim();
   if (!text) return { ok: false, error: "Nothing to read." };
-
-  if (sender && sender.tab && sender.tab.id != null) lastTtsTabId = sender.tab.id;
 
   clearOffscreenCloseTimer();
 
@@ -1355,14 +1343,7 @@ function handleBrowserTts(text, lang, settingsArg) {
         {
           lang: AR.ttsLocale(lang),
           rate: Number(settings.ttsRate) || 1,
-          pitch: Number(settings.ttsPitch) || 1,
-          onEvent(event) {
-            if (event.type === "end" || event.type === "interrupted" || event.type === "cancelled") {
-              forwardTtsState("ended");
-            } else if (event.type === "error") {
-              forwardTtsState("error");
-            }
-          }
+          pitch: Number(settings.ttsPitch) || 1
         },
         () => {
           if (settled) return;
@@ -1370,7 +1351,6 @@ function handleBrowserTts(text, lang, settingsArg) {
           const err = chrome.runtime.lastError;
           if (err) resolve({ ok: false, error: err.message });
           else {
-            forwardTtsState("playing");
             resolve({ ok: true, provider: "browser" });
           }
         }
@@ -1391,11 +1371,6 @@ async function stopAllTts() {
   } catch (e) {
     /* offscreen may not exist */
   }
-}
-
-async function stopTts() {
-  await stopAllTts();
-  scheduleOffscreenClose();
 }
 
 /* The offscreen document only exists to play audio. Close it once playback has

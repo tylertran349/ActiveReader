@@ -2,7 +2,7 @@
  * ActiveReader content script.
  *
  * Injects a small shadow-DOM toolbar whenever the user highlights text, plus a
- * panel with Translate / Audio / Quiz tabs. All heavy lifting (network calls)
+ * panel with Translate / Quiz tabs. All heavy lifting (network calls)
  * happens in the service worker.
  */
 (function () {
@@ -59,7 +59,6 @@
 
   const state = {
     translation: { status: "idle", text: "", detected: "", engine: "", error: "" },
-    audio: { status: "idle", provider: "" },
     quiz: {
       status: "idle",
       questions: [],
@@ -229,7 +228,6 @@
     const tabs = mk("div", "ar-tabs");
     [
       ["translate", "Translate"],
-      ["audio", "Audio"],
       ["quiz", "Quiz"]
     ].forEach(([key, label]) => {
       const btn = mk("button", "ar-tab", label);
@@ -417,7 +415,6 @@
   function resetForText(text) {
     selectionToken++;
     state.translation = { status: "idle", text: "", detected: "", engine: "", error: "" };
-    state.audio = { status: "idle", provider: "" };
     /* The quiz is intentionally kept: highlighting a new phrase (for example
      * to translate a word) should not throw away a quiz the reader already
      * generated. It is replaced only when a new quiz is generated. */
@@ -522,7 +519,6 @@
 
     if (bodyEl) {
       if (tab === "translate") setHtml(bodyEl, htmlTranslate());
-      else if (tab === "audio") setHtml(bodyEl, htmlAudio());
       else setHtml(bodyEl, htmlQuiz());
     }
 
@@ -636,40 +632,6 @@
       </div>
       ${out}
       ${isTruncated() ? `<div class="ar-hint">Only the first ${settings.maxSelectionLength} characters were sent.</div>` : ""}
-    `;
-  }
-
-  /* ----------------------------------------------------- audio tab html */
-
-  function htmlAudio() {
-    const a = state.audio;
-    const playing = a.status === "playing";
-    const provider = a.provider || settings.ttsProvider;
-    const providerLabel = provider === "google" ? "Google Translate voice" : "Browser voice";
-
-    return `
-      <div class="ar-audio-disc">
-        <div class="ar-disc ${playing ? "playing" : ""}">${AR.icon(playing ? "graphic_eq" : "headphones")}</div>
-        <div>
-          <div style="font-weight:600">Listen to the selection</div>
-          <div class="ar-meta" style="margin-top:2px">Voice: ${providerLabel}</div>
-        </div>
-      </div>
-
-      <div class="ar-row" style="margin-top:12px">
-        <button class="ar-btn primary" data-action="play">${AR.icon(playing ? "replay" : "play_arrow")} ${
-          playing ? "Replay" : "Play"
-        }</button>
-        <button class="ar-btn" data-action="stop">${AR.icon("stop")} Stop</button>
-      </div>
-
-      ${a.status === "failed" ? `<div class="ar-error" style="margin-top:12px">Google Translate TTS was unavailable, so the browser voice was used instead.</div>` : ""}
-      ${a.status === "error" ? `<div class="ar-error" style="margin-top:12px">Audio playback failed. Try the browser voice in settings.</div>` : ""}
-
-      <div class="ar-hint">Playing with the <b>${AR.escapeHtml(
-        AR.langLabel(settings.targetLang)
-      )}</b> voice. Change the provider, speed or pitch in settings.</div>
-      ${isTruncated() ? `<div class="ar-hint">Only the first ${settings.maxSelectionLength} characters were played.</div>` : ""}
     `;
   }
 
@@ -890,7 +852,7 @@
   }
 
   function openSpeak() {
-    tab = "audio";
+    tab = "translate";
     openPanel(true);
     runSpeak();
   }
@@ -955,9 +917,6 @@
     if (!value) return;
     const useLang = lang || settings.targetLang;
 
-    state.audio = { status: "playing", provider: settings.ttsProvider };
-    if (tab === "audio") render();
-
     const res = await send({
       type: MSG.TTS,
       text: value,
@@ -965,19 +924,9 @@
       provider: settings.ttsProvider
     });
 
-    if (res && res.ok) {
-      state.audio = { status: "playing", provider: res.provider || settings.ttsProvider };
-    } else {
-      state.audio = { status: "error", provider: "" };
+    if (!res || !res.ok) {
       toast((res && res.error) || "Could not play audio");
     }
-    if (tab === "audio") render();
-  }
-
-  async function stopSpeak() {
-    state.audio = { status: "idle", provider: "" };
-    if (tab === "audio") render();
-    await send({ type: MSG.TTS_STOP });
   }
 
   async function runQuiz(force) {
@@ -1666,7 +1615,6 @@
         saveCurrent(true);
         break;
       case "speak":
-      case "play":
         openSpeak();
         break;
       case "speak-original":
@@ -1674,9 +1622,6 @@
         break;
       case "speak-translation":
         if (state.translation.status === "done") runSpeak(state.translation.text, settings.baseLang);
-        break;
-      case "stop":
-        stopSpeak();
         break;
       case "quiz":
         openQuiz();
@@ -1886,13 +1831,6 @@
     }
     if (msg.type === MSG.COMMAND) {
       handleCommand(msg);
-      return undefined;
-    }
-    if (msg.type === MSG.TTS_STATE) {
-      if (msg.state === "ended" || msg.state === "failed" || msg.state === "error") {
-        state.audio = { status: msg.state, provider: state.audio.provider };
-        if (tab === "audio" && panelEl && panelEl.classList.contains("open")) render();
-      }
       return undefined;
     }
     return undefined;
