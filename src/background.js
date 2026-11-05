@@ -979,48 +979,33 @@ async function handleQuiz(msg) {
   }
 }
 
-/* Some fast/lite models return fewer questions than asked for, so ask again for
- * the missing ones and merge the results. Questions are de-duplicated by text
- * across rounds so a top-up never repeats a question the learner already has. */
-const QUIZ_MAX_ROUNDS = 3;
+/* Generate the whole quiz with a single API request. Fast/lite models sometimes
+ * return fewer questions than asked for, but topping up with another request
+ * doubles (or triples) the API usage. Instead we ask for a couple of spares in
+ * the same response and keep the first `wantCount` usable, de-duplicated ones. */
+const QUIZ_SPARE_QUESTIONS = 2;
 
 async function generateQuestions(text, cfg, settings, wantCount) {
-  const collected = [];
+  const askCount = Math.min(24, wantCount + QUIZ_SPARE_QUESTIONS);
+  const prompt = buildQuizPrompt(text, cfg, settings, askCount, wantCount);
+  const raw = await callLLM(prompt, settings, QUIZ_SCHEMA, 0.85, 4096);
+  const parsed = parseJsonLoose(raw);
+
   const seen = new Set();
+  const collected = [];
+  const fresh = (Array.isArray(parsed && parsed.questions) ? parsed.questions : [])
+    .map(normalizeQuestion)
+    .filter(Boolean);
 
-  for (let round = 0; round < QUIZ_MAX_ROUNDS && collected.length < wantCount; round++) {
-    const need = wantCount - collected.length;
-    const prompt = buildQuizPrompt(text, cfg, settings, need, collected);
-    const raw = await callLLM(prompt, settings, QUIZ_SCHEMA, 0.85, 4096);
-
-    let parsed;
-    try {
-      parsed = parseJsonLoose(raw);
-    } catch (e) {
-      // Keep any questions already gathered; only fail if we have none.
-      if (collected.length) break;
-      throw e;
-    }
-
-    const fresh = (Array.isArray(parsed && parsed.questions) ? parsed.questions : [])
-      .map(normalizeQuestion)
-      .filter(Boolean);
-
-    let added = 0;
-    for (const q of fresh) {
-      const key = questionKey(q);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      collected.push(q);
-      added++;
-      if (collected.length >= wantCount) break;
-    }
-
-    // Nothing new came back — stop rather than burn more calls.
-    if (!added) break;
+  for (const q of fresh) {
+    const key = questionKey(q);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    collected.push(q);
+    if (collected.length >= wantCount) break;
   }
 
-  return collected.slice(0, wantCount);
+  return collected;
 }
 
 function questionKey(q) {
@@ -1030,7 +1015,7 @@ function questionKey(q) {
     .trim();
 }
 
-function buildQuizPrompt(text, cfg, settings, count, existing) {
+function buildQuizPrompt(text, cfg, settings, count, keepCount) {
   const target = AR.langName(settings.targetLang);
   const base = AR.langName(settings.baseLang);
   const typeLabels = AR.QUIZ_TYPE_LABELS;
@@ -1053,8 +1038,9 @@ function buildQuizPrompt(text, cfg, settings, count, existing) {
   const lines = [
     `You are a patient ${target} language tutor creating a reading-comprehension quiz.`,
     `The learner's native language is ${base} and they are learning ${target} at a ${difficulty} level.`,
-    `Create exactly ${count} questions using only information found in the TEXT below.`,
-    `The "questions" array MUST contain exactly ${count} complete items — not fewer.`,
+    `Write ${count} distinct questions using only information found in the TEXT below, so there are at least ${keepCount} usable ones.`,
+    `Put the clearest and most useful questions first; extra questions beyond ${keepCount} are discarded automatically.`,
+    `The "questions" array MUST contain all ${count} complete items — not fewer.`,
     `Use only these question types: ${chosen}.`,
     languageRule,
     `Rules:`,
@@ -1067,14 +1053,6 @@ function buildQuizPrompt(text, cfg, settings, count, existing) {
       : `- You may leave "explanation" empty.`,
     `- Do not repeat the same fact in multiple questions.`
   ];
-
-  if (existing && existing.length) {
-    lines.push(
-      ``,
-      `You have already written these ${existing.length} question(s). Do not repeat or reword them, and do not ask about the same fact again:`
-    );
-    existing.forEach((q) => lines.push(`- ${q.question}`));
-  }
 
   lines.push(
     ``,
