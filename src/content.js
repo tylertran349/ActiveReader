@@ -326,6 +326,10 @@
 
   function onSelectionEvent(e) {
     if (isInsideUi(e)) return;
+    /* A native double-click selects the clicked word. With click-a-word enabled
+     * that gesture is owned by the definition popup, so it must not also summon
+     * the selection toolbar or the auto-translate panel. */
+    const fromDoubleClick = e.type === "mouseup" && e.detail > 1;
     setTimeout(() => {
       const info = getSelectionInfo();
       if (!info || info.text.length < (settings.minSelectionLength || 1)) {
@@ -337,6 +341,11 @@
       if (changed) resetForText(info.text);
       current.text = info.text;
       current.rect = info.rect;
+
+      if (settings.clickDefine && fromDoubleClick && isActiveSite() && selectedWordText(info.text)) {
+        hideToolbar();
+        return;
+      }
 
       if (settings.showToolbar && isActiveSite()) showToolbar();
       else hideToolbar();
