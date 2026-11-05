@@ -565,14 +565,14 @@ async function llmTranslate(text, target, settings) {
 /* Route every LLM call through whichever backend is selected in settings. The
  * Gemini path keeps its native schema support; the custom path speaks the
  * OpenAI Chat Completions dialect used by Command Code and most gateways. */
-async function callLLM(prompt, settings, schema, temperature, maxOutputTokens) {
+async function callLLM(prompt, settings, schema, temperature, maxOutputTokens, opts) {
   if (settings.llmProvider === "custom") {
-    return callCustomModel(prompt, settings, schema, temperature, maxOutputTokens);
+    return callCustomModel(prompt, settings, schema, temperature, maxOutputTokens, opts);
   }
-  return callGemini(prompt, settings, schema, temperature, maxOutputTokens);
+  return callGemini(prompt, settings, schema, temperature, maxOutputTokens, opts);
 }
 
-async function callCustomModel(prompt, settings, schema, temperature, maxOutputTokens) {
+async function callCustomModel(prompt, settings, schema, temperature, maxOutputTokens, opts) {
   const key = String(settings.customApiKey || "").trim();
   if (!key) {
     throw new Error("No API key set for the custom provider. Open ActiveReader settings to add one.");
@@ -600,8 +600,13 @@ async function callCustomModel(prompt, settings, schema, temperature, maxOutputT
 
   // DeepSeek and OpenAI-style reasoning models accept this on Chat
   // Completions. When the field is omitted the provider uses its own default,
-  // which is exactly what the "model default" entry in the UI means.
-  const effort = AR.resolveThinkingLevel(model, settings.customThinkingLevel);
+  // which is exactly what the "model default" entry in the UI means. Quiz
+  // writing asks for the cheapest level because reasoning tokens are billed as
+  // output and add nothing to a simple reading-comprehension quiz.
+  const effort =
+    opts && opts.cheap
+      ? AR.resolveQuizThinkingLevel(model, settings.customThinkingLevel)
+      : AR.resolveThinkingLevel(model, settings.customThinkingLevel);
   if (effort) body.reasoning_effort = effort;
 
   // JSON mode improves quiz/grading reliability on supported gateways. Retry
@@ -695,7 +700,7 @@ function customApiErrorMessage(status, detail) {
 
 /* -------------------------------------------------------------- gemini */
 
-async function callGemini(prompt, settings, schema, temperature, maxOutputTokens) {
+async function callGemini(prompt, settings, schema, temperature, maxOutputTokens, opts) {
   const key = String(settings.geminiApiKey || "").trim();
   if (!key) {
     throw new Error("No Gemini API key set. Open ActiveReader settings to add one.");
@@ -719,6 +724,10 @@ async function callGemini(prompt, settings, schema, temperature, maxOutputTokens
     generationConfig.responseSchema = schema;
   }
   if (maxOutputTokens) generationConfig.maxOutputTokens = maxOutputTokens;
+  if (opts && opts.noThinking) {
+    const thinking = AR.geminiQuizThinkingConfig(model);
+    if (thinking) generationConfig.thinkingConfig = thinking;
+  }
 
   const body = {
     contents: [{ role: "user", parts: [{ text: prompt }] }],
@@ -943,16 +952,79 @@ const QUIZ_SCHEMA = {
           answer: { type: "STRING" },
           explanation: { type: "STRING" }
         },
-        required: ["type", "question", "answer"]
+        // MCQ answers are derived from options[answerIndex], so the model does
+        // not have to repeat the correct option in a separate "answer" field.
+        required: ["type", "question"]
       }
     }
   },
   required: ["questions"]
 };
 
+const QUIZ_CACHE_KEY = "quizCache";
+const QUIZ_CACHE_VERSION = 2;
+const quizInFlight = new Map();
+
+/* A stable key for (passage + quiz options + backend). Length + a 32-bit hash
+ * keeps the stored key small even for long selections. */
+function quizCacheKey(text, cfg, settings) {
+  const custom = settings.llmProvider === "custom";
+  return [
+    "v" + QUIZ_CACHE_VERSION,
+    settings.llmProvider,
+    custom ? settings.customApiBaseUrl : "",
+    custom ? settings.customApiModel : settings.geminiModel,
+    custom ? settings.customThinkingLevel : "",
+    settings.targetLang,
+    settings.baseLang,
+    cfg.difficulty,
+    cfg.count,
+    (cfg.types || []).slice().sort().join(","),
+    cfg.quizLanguage,
+    cfg.explain ? "1" : "0",
+    text.length,
+    hashString(text).toString(36)
+  ].join("|");
+}
+
+async function getCachedQuiz(key) {
+  try {
+    const store = (await chrome.storage.session.get(QUIZ_CACHE_KEY))[QUIZ_CACHE_KEY] || {};
+    const hit = store[key];
+    return hit && Array.isArray(hit.q) && hit.q.length ? hit.q : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function setCachedQuiz(key, questions) {
+  try {
+    const store = (await chrome.storage.session.get(QUIZ_CACHE_KEY))[QUIZ_CACHE_KEY] || {};
+    store[key] = { q: questions, ts: Date.now() };
+
+    const keys = Object.keys(store);
+    const max = AR.CACHE.SESSION_QUIZ_MAX;
+    if (keys.length > max) {
+      keys.sort((a, b) => (store[a].ts || 0) - (store[b].ts || 0));
+      for (let i = 0; i < keys.length - max; i++) delete store[keys[i]];
+    }
+
+    await chrome.storage.session.set({ [QUIZ_CACHE_KEY]: store });
+  } catch (e) {
+    /* session storage unavailable; caching is best-effort */
+  }
+}
+
 async function handleQuiz(msg) {
   const settings = await AR.getSettings();
-  const text = String(msg.text || "").trim();
+  // Respect the reader's "Maximum characters to send" setting up to the quiz
+  // hard cap, and collapse whitespace before slicing so a poorly formatted
+  // selection costs fewer input tokens without losing any words.
+  const maxChars = Math.min(
+    AR.QUIZ_MAX_INPUT_CHARS,
+    Math.max(200, Number(settings.maxSelectionLength) || 2000)
+  );
+  const text = AR.compactQuizText(msg.text, maxChars);
   if (!text) return { ok: false, error: "Select some text first." };
 
   const cfg = Object.assign(
@@ -967,28 +1039,63 @@ async function handleQuiz(msg) {
   );
 
   const wantCount = Math.max(1, Math.min(20, Number(cfg.count) || 5));
+  cfg.count = wantCount;
+  cfg.explain = !!cfg.explain;
+  cfg.types = (Array.isArray(cfg.types) ? cfg.types : []).filter(
+    (t) => AR.QUIZ_TYPES.indexOf(t) !== -1
+  );
+  if (!cfg.types.length) cfg.types = AR.QUIZ_TYPES.slice();
+
+  const key = quizCacheKey(text, cfg, settings);
 
   try {
-    const questions = await generateQuestions(text, cfg, settings, wantCount);
-    if (!questions.length) {
-      throw new Error("The model did not return usable questions. Try again.");
+    // "New quiz" deliberately bypasses the cache; every other request reuses a
+    // quiz generated earlier in this browser session for the same passage and
+    // options, so no API call is made.
+    if (!msg.force) {
+      const cached = await getCachedQuiz(key);
+      if (cached) {
+        return { ok: true, questions: cached, requested: wantCount, cached: true };
+      }
     }
-    return { ok: true, questions, requested: wantCount };
+
+    // Two tabs (or a double click) asking for the same quiz share one request.
+    const existing = quizInFlight.get(key);
+    if (existing) return await existing;
+
+    const job = (async () => {
+      const questions = await generateQuestions(text, cfg, settings, wantCount);
+      if (!questions.length) {
+        throw new Error("The model did not return usable questions. Try again.");
+      }
+      await setCachedQuiz(key, questions);
+      return { ok: true, questions, requested: wantCount };
+    })();
+
+    quizInFlight.set(key, job);
+    const clear = () => {
+      if (quizInFlight.get(key) === job) quizInFlight.delete(key);
+    };
+    job.then(clear, clear);
+    return await job;
   } catch (e) {
     return { ok: false, error: e.message };
   }
 }
 
-/* Generate the whole quiz with a single API request. Fast/lite models sometimes
- * return fewer questions than asked for, but topping up with another request
- * doubles (or triples) the API usage. Instead we ask for a couple of spares in
- * the same response and keep the first `wantCount` usable, de-duplicated ones. */
-const QUIZ_SPARE_QUESTIONS = 2;
-
+/* Generate the whole quiz with a single API request, asking for exactly the
+ * number of questions needed. Extra "spare" questions would be discarded and
+ * still billed as output tokens, so they are intentionally not requested. */
 async function generateQuestions(text, cfg, settings, wantCount) {
-  const askCount = Math.min(24, wantCount + QUIZ_SPARE_QUESTIONS);
-  const prompt = buildQuizPrompt(text, cfg, settings, askCount, wantCount);
-  const raw = await callLLM(prompt, settings, QUIZ_SCHEMA, 0.85, 4096);
+  const prompt = AR.buildQuizPrompt(text, cfg, settings, wantCount);
+  const raw = await callLLM(
+    prompt,
+    settings,
+    QUIZ_SCHEMA,
+    0.85,
+    AR.quizOutputTokenLimit(wantCount, cfg.explain),
+    { cheap: true, noThinking: true }
+  );
   const parsed = parseJsonLoose(raw);
 
   const seen = new Set();
@@ -1013,55 +1120,6 @@ function questionKey(q) {
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
-}
-
-function buildQuizPrompt(text, cfg, settings, count, keepCount) {
-  const target = AR.langName(settings.targetLang);
-  const base = AR.langName(settings.baseLang);
-  const typeLabels = AR.QUIZ_TYPE_LABELS;
-
-  const chosen = (Array.isArray(cfg.types) && cfg.types.length ? cfg.types : AR.QUIZ_TYPES)
-    .map((t) => typeLabels[t] || t)
-    .join(", ");
-
-  const difficulty = cfg.difficulty || "intermediate";
-
-  let languageRule;
-  if (cfg.quizLanguage === "base") {
-    languageRule = `Write every question, option, answer and explanation in ${base}.`;
-  } else if (cfg.quizLanguage === "both") {
-    languageRule = `Write each question in ${target} and include a ${base} translation of the question in parentheses.`;
-  } else {
-    languageRule = `Write every question, option and answer in ${target}.`;
-  }
-
-  const lines = [
-    `You are a patient ${target} language tutor creating a reading-comprehension quiz.`,
-    `The learner's native language is ${base} and they are learning ${target} at a ${difficulty} level.`,
-    `Write ${count} distinct questions using only information found in the TEXT below, so there are at least ${keepCount} usable ones.`,
-    `Put the clearest and most useful questions first; extra questions beyond ${keepCount} are discarded automatically.`,
-    `The "questions" array MUST contain all ${count} complete items — not fewer.`,
-    `Use only these question types: ${chosen}.`,
-    languageRule,
-    `Rules:`,
-    `- Multiple choice: give exactly 4 plausible options and set "answerIndex" to the 0-based index of the correct one.`,
-    `- Fill in the blank: a sentence from the text where the tested word/phrase is replaced by "____"; put the missing word(s) in "answer".`,
-    `- Short answer: an open comprehension question; put a concise model answer in "answer".`,
-    `- Always fill "answer" with the correct answer text.`,
-    cfg.explain
-      ? `- Always fill "explanation" with one short sentence in ${base} explaining why the answer is correct.`
-      : `- You may leave "explanation" empty.`,
-    `- Do not repeat the same fact in multiple questions.`
-  ];
-
-  lines.push(
-    ``,
-    `Return JSON only, with a top-level "questions" array. Each item has "type" ("mcq", "short" or "blank"), "question", optional "options" (4 strings for mcq), optional "answerIndex", "answer", and optional "explanation".`,
-    ``,
-    `TEXT:`,
-    text
-  );
-  return lines.join("\n");
 }
 
 function normalizeQuestion(q) {

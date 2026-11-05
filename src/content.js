@@ -76,7 +76,7 @@
     }
   };
 
-  const MAX_QUIZ_CHARS = 4000;
+  const MAX_QUIZ_CHARS = AR.QUIZ_MAX_INPUT_CHARS;
   const PANEL_MIN_W = 280;
   const PANEL_MIN_H = 220;
 
@@ -576,13 +576,20 @@
     return t.length > max ? t.slice(0, max) : t;
   }
 
+  /* Respect the reader's "Maximum characters to send" setting, but never send
+   * more than the quiz hard cap. The same rule runs in the background so both
+   * sides build the same cache key. */
+  function quizCharLimit() {
+    const configured = Number(settings.maxSelectionLength) || 2000;
+    return Math.min(MAX_QUIZ_CHARS, Math.max(200, configured));
+  }
+
   function quizText() {
-    const t = String(current.text || "");
-    return t.length > MAX_QUIZ_CHARS ? t.slice(0, MAX_QUIZ_CHARS) : t;
+    return AR.compactQuizText(current.text, quizCharLimit());
   }
 
   function isQuizTruncated() {
-    return (current.text || "").length > MAX_QUIZ_CHARS;
+    return AR.compactQuizText(current.text, quizCharLimit() + 1).length > quizCharLimit();
   }
 
   /* Bounded FIFO cache: keeps the newest `max` entries. */
@@ -598,6 +605,10 @@
 
   function quizKey(text, cfg) {
     return JSON.stringify([
+      settings.llmProvider,
+      settings.llmProvider === "custom" ? settings.customApiBaseUrl : "",
+      settings.llmProvider === "custom" ? settings.customApiModel : settings.geminiModel,
+      settings.llmProvider === "custom" ? settings.customThinkingLevel : "",
       settings.targetLang,
       settings.baseLang,
       !!settings.quizExplain,
@@ -725,7 +736,7 @@
     `;
 
     const truncNote = isQuizTruncated()
-      ? `<div class="ar-hint">Only the first ${MAX_QUIZ_CHARS} characters were sent to the AI model.</div>`
+      ? `<div class="ar-hint">Only the first ${quizCharLimit()} characters were sent to the AI model.</div>`
       : "";
 
     const shortNote =
@@ -983,6 +994,8 @@
     const res = await send({
       type: MSG.QUIZ,
       text,
+      // "New quiz" must not reuse the background's session cache.
+      force: !!force,
       config: {
         types: cfg.types,
         difficulty: cfg.difficulty,

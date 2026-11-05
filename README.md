@@ -15,7 +15,7 @@ dependencies.
 |---|---|
 | 🔊 **Text to speech** | Uses the Google Translate voice by default (natural, no API key). Falls back to the built-in browser voice if Google is unreachable. Long selections are split into chunks automatically. |
 | 🌐 **Translation** | Translates the highlighted text into your own language via Google Translate, with an optional AI engine, and reports the detected source language. Small speaker buttons play the original or the translation aloud. |
-| 🎓 **AI quizzes** | Your chosen AI model generates multiple-choice, short-answer and fill-in-the-blank questions from the selection. Answer them inline and get instant feedback: free-response answers are graded by the model (equivalent wording and small typos count) with a short explanation written in your own language. A **Translate question** button under each question shows it in your own language. Your last quiz stays put when you highlight new text or switch tabs, and if the model returns fewer questions than you asked for, ActiveReader automatically asks again to fill the quiz. |
+| 🎓 **AI quizzes** | Your chosen AI model generates multiple-choice, short-answer and fill-in-the-blank questions from the selection. Answer them inline and get instant feedback: free-response answers are graded by the model (equivalent wording and small typos count) with a short explanation written in your own language. A **Translate question** button under each question shows it in your own language. Your last quiz stays put when you highlight new text or switch tabs. Each quiz is generated with one request — ActiveReader does not make a second call to top up missing questions. |
 | 🖱️ **Click-a-word** | Optionally, click **any single word** while reading and a small popup appears right above it with a quick lookup of that word. Uses Google Translate by default (no key, no API cost); switch the translation engine to AI in settings for a richer, context-aware definition with part of speech and a tiny example. Off by default — turn it on via **Settings → Reading & selection → Show a definition when I click a single word**. |
 | ⭐ **Vocabulary** | Save words/phrases with their translation and source page. Search, export (JSON/CSV) and manage them in settings. |
 | ⬆️ **Update checks** | ActiveReader notices when its own version changes and, optionally, checks this GitHub project for a newer build every 12 hours. When one exists you get a toolbar badge, an optional notification, an in-popup banner — and an **Update now** button in settings that fetches the newest files from this repo and installs them in place. |
@@ -68,7 +68,9 @@ GOAT plan:
   other model ID) or fetch the provider's live list.
 - **Thinking level** — populated from the model's advertised levels
   (`low`, `high`, `max` for DeepSeek V4.1 Flash). The model's default level is
-  selected automatically; pick another to override it.
+  selected automatically; pick another to override it for grading, translation
+  and word lookups. Quiz generation always uses the cheapest available level to
+  keep token usage down.
 
 The API key is stored in Chrome sync storage and is only ever sent to the base
 URL you enter. Only hosts granted in the manifest can be reached; Command Code's
@@ -215,12 +217,19 @@ Translate MP3s and plays them, keeping playback reliable regardless of the page.
 
 ## Performance & caching
 
-- Translations are cached per page and session-wide, and quizzes are cached per
-  page, so re-opening the panel or re-reading a passage does not repeat a call.
+- Translations and quizzes are cached per page and for the browser session, so
+  re-opening the panel, reloading a page, or selecting the same passage in
+  another tab does not repeat an AI call. Two simultaneous requests for the same
+  quiz are merged into one call.
 - The AI model list is cached for 12 hours. **Fetch models** always refreshes
   it; automatic model selection reuses the cache.
-- AI output is bounded and quiz/translation text is capped — very long
-  selections are trimmed and the panel tells you when that happens.
+- AI output is bounded, and quiz/translation text is capped by your
+  **Maximum characters to send** setting (quizzes also have a 4,000-character
+  hard cap). Whitespace is compacted before sending, and the panel tells you
+  when a selection was trimmed.
+- Quiz prompts only describe the question types and JSON fields you selected,
+  ask for exactly the number of questions shown, and use the cheapest thinking
+  level a reasoning model offers, so input and output tokens stay small.
 - The audio offscreen document closes itself after playback has been idle for
   30 seconds.
 

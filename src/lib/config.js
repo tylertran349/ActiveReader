@@ -761,6 +761,137 @@
     blank: "Fill in the blank"
   };
 
+  /* ------------------------------------------------------------- quiz cost */
+
+  /* Hard cap on the passage sent to the model. The content script applies the
+   * same cap before building its local cache key. */
+  AR.QUIZ_MAX_INPUT_CHARS = 4000;
+
+  /* Selections often carry indentation, markup gaps and runs of blank lines.
+   * Collapsing that whitespace lowers input tokens without dropping words. */
+  AR.compactQuizText = function (text, maxChars) {
+    const cap = Math.max(1, Number(maxChars) || AR.QUIZ_MAX_INPUT_CHARS);
+    const raw = String(text == null ? "" : text);
+    // Only clean a bounded prefix so selecting an enormous page stays cheap.
+    const head = raw.length > cap * 2 ? raw.slice(0, cap * 2) : raw;
+    return head
+      .replace(/\r\n?/g, "\n")
+      .replace(/[\t\f\v\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000]+/g, " ")
+      .replace(/ {2,}/g, " ")
+      .replace(/ *\n */g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim()
+      .slice(0, cap);
+  };
+
+  /* A tight output budget keeps a chatty model from generating a long quiz
+   * that would be discarded anyway. Reasoning tokens count against this limit
+   * too, which is why quiz calls ask for the cheapest thinking level. */
+  AR.quizOutputTokenLimit = function (count, explain) {
+    const n = Math.max(1, Math.min(20, Number(count) || 5));
+    const perQuestion = explain ? 220 : 180;
+    return Math.max(500, Math.min(3584, Math.round(400 + n * perQuestion)));
+  };
+
+  /* Quiz writing needs little deliberate reasoning. Use the cheapest level a
+   * known reasoning model offers; unknown models keep the user's choice so we
+   * never send an effort value the provider does not understand. */
+  AR.resolveQuizThinkingLevel = function (modelId, requested) {
+    const info = AR.getThinkingLevels(modelId);
+    if (info.levels.length) return info.levels[0];
+    return AR.resolveThinkingLevel(modelId, requested);
+  };
+
+  /* Thinking tokens are billed as output, so quiz writing asks for the
+   * cheapest setting the model supports. Gemini 2.5 Flash accepts a zero
+   * budget; Gemini 3.x Flash models no longer support fully disabling thinking,
+   * so they get "low". Pro and Gemini 4+ models are left alone (they reject
+   * these values). */
+  AR.geminiQuizThinkingConfig = function (modelId) {
+    const id = String(modelId || "").toLowerCase();
+    // Flash-Lite models already skip thinking; sending a level could turn it
+    // on and cost more. Pro and Gemini 4+ reject these fields.
+    if (
+      id.indexOf("flash") === -1 ||
+      id.indexOf("pro") !== -1 ||
+      id.indexOf("lite") !== -1
+    ) {
+      return null;
+    }
+    if (/gemini-2\.5/.test(id)) return { thinkingBudget: 0 };
+    if (/gemini-3(?:\.\d+)?/.test(id)) return { thinkingLevel: "low" };
+    return null;
+  };
+
+  /* Compact prompt: only explains the question types the learner actually
+   * selected, and only asks for the JSON fields that will be used. */
+  AR.buildQuizPrompt = function (text, cfg, settings, count) {
+    const target = AR.langName(settings.targetLang);
+    const base = AR.langName(settings.baseLang);
+
+    const allowed = (Array.isArray(cfg.types) ? cfg.types : []).filter(
+      (t) => AR.QUIZ_TYPES.indexOf(t) !== -1
+    );
+    const types = allowed.length ? allowed : AR.QUIZ_TYPES.slice();
+    const chosen = types
+      .map((t) => `${t} (${AR.QUIZ_TYPE_LABELS[t] || t})`)
+      .join(", ");
+
+    const difficulty = cfg.difficulty || "intermediate";
+
+    let languageRule;
+    if (cfg.quizLanguage === "base") {
+      languageRule = `Write every question, option, answer and explanation in ${base}.`;
+    } else if (cfg.quizLanguage === "both") {
+      languageRule = `Write each question in ${target} with a ${base} translation in parentheses.`;
+    } else {
+      languageRule = `Write every question, option and answer in ${target}.`;
+    }
+
+    const rules = [];
+    if (types.indexOf("mcq") !== -1) {
+      rules.push(`- mcq: exactly 4 options; "answerIndex" is the 0-based correct option (do not repeat it in "answer").`);
+    }
+    if (types.indexOf("blank") !== -1) {
+      rules.push(`- blank: copy a sentence from the TEXT and replace the tested word or phrase with "____"; "answer" is the missing text.`);
+    }
+    if (types.indexOf("short") !== -1) {
+      rules.push(`- short: open comprehension question; "answer" is a concise model answer.`);
+    }
+    if (types.indexOf("mcq") === -1) {
+      rules.push(`- "answer" is always required.`);
+    }
+    rules.push(
+      cfg.explain
+        ? `- "explanation": one short sentence in ${base}.`
+        : `- Omit "explanation".`
+    );
+    rules.push(`- Do not test the same fact twice.`);
+
+    const fields = [
+      `"type":"${types[0]}"`,
+      `"question":"..."`
+    ];
+    if (types.indexOf("mcq") !== -1) fields.push(`"options":["..."],"answerIndex":0`);
+    if (types.indexOf("short") !== -1 || types.indexOf("blank") !== -1) {
+      fields.push(`"answer":"..."`);
+    }
+    if (cfg.explain) fields.push(`"explanation":"..."`);
+
+    return [
+      `You are a ${target} tutor writing a reading-comprehension quiz for a learner at ${difficulty} level whose native language is ${base}.`,
+      `Write exactly ${count} questions using only the TEXT below.`,
+      `Allowed question types: ${chosen}.`,
+      languageRule,
+      `Rules:`,
+      ...rules,
+      `Return compact JSON only, with no markdown or commentary: {"questions":[{${fields.join(",")}}]}`,
+      ``,
+      `TEXT:`,
+      text
+    ].join("\n");
+  };
+
   /* Languages written right-to-left. */
   AR.RTL_LANGS = { ar: true, he: true, fa: true, ur: true };
 
@@ -806,8 +937,10 @@
     // Max cached translations / quizzes kept per context.
     TRANSLATION_MAX: 60,
     QUIZ_MAX: 20,
-    // Max translations kept in the session-wide cache in the service worker.
-    SESSION_TRANSLATION_MAX: 200
+    // Max translations / quizzes kept in the session-wide cache in the service
+    // worker. A session-wide quiz hit costs no API call at all.
+    SESSION_TRANSLATION_MAX: 200,
+    SESSION_QUIZ_MAX: 20
   };
 
   /* ------------------------------------------------------------ helpers */

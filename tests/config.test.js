@@ -372,6 +372,92 @@ test("custom endpoint helpers accept bare roots and full chat URLs", () => {
   );
 });
 
+test("compactQuizText collapses wasted whitespace and enforces the cap", () => {
+  assert.strictEqual(AR.compactQuizText("  a\t\tb\n\n\n\nc  "), "a b\n\nc");
+  assert.strictEqual(AR.compactQuizText("abcdef", 3), "abc");
+  assert.strictEqual(AR.compactQuizText("  \r\n  "), "");
+  // Newlines between real lines survive; only their surrounding padding goes.
+  assert.strictEqual(AR.compactQuizText("one\n  two\n"), "one\ntwo");
+});
+
+test("quiz output budget grows with the question count and explanations", () => {
+  const short = AR.quizOutputTokenLimit(5, false);
+  const long = AR.quizOutputTokenLimit(5, true);
+  assert.ok(short > 0);
+  assert.ok(long > short);
+  assert.ok(long < 4096);
+  assert.strictEqual(AR.quizOutputTokenLimit(100, true), 3584);
+  assert.strictEqual(AR.quizOutputTokenLimit(1, false), 580);
+});
+
+test("quiz writing uses the cheapest known thinking level", () => {
+  assert.strictEqual(AR.resolveQuizThinkingLevel("deepseek/deepseek-v4.1-flash", "max"), "low");
+  assert.strictEqual(AR.resolveQuizThinkingLevel("deepseek/deepseek-v4-flash", "max"), "high");
+  // Unknown models keep the explicit choice instead of inventing a level.
+  assert.strictEqual(AR.resolveQuizThinkingLevel("unknown/model", "max"), "max");
+  assert.strictEqual(AR.resolveQuizThinkingLevel("unknown/model", ""), "");
+});
+
+test("Gemini quiz calls use the cheapest supported thinking setting", () => {
+  assert.deepStrictEqual(AR.geminiQuizThinkingConfig("gemini-2.5-flash"), { thinkingBudget: 0 });
+  assert.deepStrictEqual(AR.geminiQuizThinkingConfig("gemini-3-flash-preview"), { thinkingLevel: "low" });
+  assert.deepStrictEqual(AR.geminiQuizThinkingConfig("gemini-3.8-flash"), { thinkingLevel: "low" });
+  // Lite models already skip thinking; a level could switch it on.
+  assert.strictEqual(AR.geminiQuizThinkingConfig("gemini-2.5-flash-lite"), null);
+  assert.strictEqual(AR.geminiQuizThinkingConfig("gemini-3.5-flash-lite"), null);
+  // Pro and Gemini 4+ models reject these values, so leave them at defaults.
+  assert.strictEqual(AR.geminiQuizThinkingConfig("gemini-2.5-pro"), null);
+  assert.strictEqual(AR.geminiQuizThinkingConfig("gemini-4-argon"), null);
+  assert.strictEqual(AR.geminiQuizThinkingConfig("gemini-2.0-flash"), null);
+});
+
+test("quiz prompt only documents the selected types and requested fields", () => {
+  const settings = { targetLang: "es", baseLang: "en" };
+  const mcqOnly = AR.buildQuizPrompt("Hola mundo", {
+    types: ["mcq"],
+    difficulty: "beginner",
+    quizLanguage: "target",
+    explain: false
+  }, settings, 3);
+
+  assert.ok(mcqOnly.includes("exactly 3 questions"));
+  assert.ok(mcqOnly.includes("Hola mundo"));
+  assert.ok(mcqOnly.includes("mcq (Multiple choice)"));
+  assert.ok(mcqOnly.includes('"answerIndex"'));
+  assert.ok(!mcqOnly.includes("Fill in the blank"));
+  assert.ok(!mcqOnly.includes("short: open"));
+  assert.ok(!mcqOnly.includes('"answer":"..."'));
+  assert.ok(!mcqOnly.includes('"explanation":"..."'));
+  // A short prompt is the main way input tokens are kept low.
+  assert.ok(mcqOnly.length < 800, "prompt was " + mcqOnly.length + " chars");
+
+  const full = AR.buildQuizPrompt("Hola mundo", {
+    types: ["mcq", "short", "blank"],
+    difficulty: "advanced",
+    quizLanguage: "both",
+    explain: true
+  }, settings, 5);
+
+  assert.ok(
+    full.includes(
+      "mcq (Multiple choice), short (Short answer), blank (Fill in the blank)"
+    )
+  );
+  assert.ok(full.includes("Fill in the blank"));
+  assert.ok(full.includes('"explanation"'));
+  assert.ok(full.includes("translation in parentheses"));
+
+  const shortOnly = AR.buildQuizPrompt("Hola mundo", {
+    types: ["short"],
+    difficulty: "intermediate",
+    quizLanguage: "target",
+    explain: false
+  }, settings, 4);
+  assert.ok(shortOnly.includes('"answer":"..."'));
+  assert.ok(!shortOnly.includes('"options"'));
+  assert.ok(!shortOnly.includes('"answerIndex"'));
+});
+
 (async () => {
   console.log("config.js");
   let passed = 0;

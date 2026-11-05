@@ -271,7 +271,7 @@
       note.textContent =
         "The model's default" +
         (fallback ? " (" + fallback + ")" : "") +
-        " is selected unless you choose another level.";
+        " is selected unless you choose another level. Quiz generation always uses the cheapest level to save tokens.";
     }
 
     const current = String(settings.customThinkingLevel || "").toLowerCase();
