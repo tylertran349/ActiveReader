@@ -793,7 +793,7 @@
                 )} Answer: ${AR.escapeHtml(q.answer)}</div>`
             : ""
         }
-        ${feedback ? `<div class="ar-explain">${AR.icon("auto_awesome")} ${AR.escapeHtml(feedback)}</div>` : ""}
+        ${feedback ? `<div class="ar-explain">${AR.escapeHtml(feedback)}</div>` : ""}
       `;
     }
 
