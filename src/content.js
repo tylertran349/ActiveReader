@@ -117,6 +117,12 @@
     .ar-icon{display:inline-block;width:1.15em;height:1.15em;flex:none;vertical-align:-0.19em;fill:currentColor;pointer-events:none}
     .ar-panel{display:none;flex-direction:column;width:384px;max-height:70vh;background:var(--ar-bg);color:var(--ar-fg);border:1px solid var(--ar-border);border-radius:16px;box-shadow:var(--ar-shadow);overflow:hidden;font-size:14px}
     .ar-panel.open{display:flex}
+    .ar-sel{margin:10px 12px 0;padding:8px 10px;background:var(--ar-bg-2);border:1px solid var(--ar-border);border-radius:10px;flex:0 1 auto;min-height:40px;overflow:auto;font-size:15px;white-space:pre-wrap;word-break:break-word}
+    .ar-body{flex:1 1 auto;padding:12px;overflow:auto}
+    .ar-body[data-tab="translate"]{display:flex;flex-direction:column;overflow:hidden}
+    .ar-body[data-tab="translate"]>*{flex:none}
+    .ar-body[data-tab="translate"]>.ar-result{flex:1 1 auto;overflow:auto}
+    .ar-result{margin-top:12px;padding:12px;border-radius:12px;background:var(--ar-bg-2);border:1px solid var(--ar-border);font-size:15px;line-height:1.6;white-space:pre-wrap;word-break:break-word;min-height:54px}
     .ar-resize-handle{position:absolute;touch-action:none;background:transparent}
     .ar-resize-handle[data-dir="n"]{top:0;left:10px;right:10px;height:6px;cursor:ns-resize;z-index:5}
     .ar-resize-handle[data-dir="s"]{bottom:0;left:10px;right:10px;height:6px;cursor:ns-resize;z-index:5}
@@ -527,6 +533,9 @@
     if (badgeEl) badgeEl.textContent = AR.langLabel(settings.targetLang);
 
     if (bodyEl) {
+      /* Lets the CSS restyle the tab contents as a flex column where needed
+       * (e.g. the Translate tab, whose two text boxes share the height). */
+      bodyEl.dataset.tab = tab;
       if (tab === "translate") setHtml(bodyEl, htmlTranslate());
       else setHtml(bodyEl, htmlQuiz());
     }

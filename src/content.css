@@ -336,6 +336,14 @@
   display: none;
 }
 
+/* Chrome around the tab content keeps its natural height; only the two text
+ * boxes flex when the panel runs out of vertical space. */
+.ar-head,
+.ar-tabs,
+.ar-sel-label {
+  flex: none;
+}
+
 .ar-sel-label:not([hidden]) + .ar-sel {
   margin-top: 4px;
 }
@@ -346,7 +354,10 @@
   background: var(--ar-bg-2);
   border: 1px solid var(--ar-border);
   border-radius: 10px;
-  max-height: 92px;
+  /* Never taller than it needs to be, but shrink (never grow) under height
+   * pressure so the tab itself never has to scroll. */
+  flex: 0 1 auto;
+  min-height: 40px; /* keep at least one line visible */
   overflow: auto;
   font-size: 15px;
   color: var(--ar-fg);
@@ -394,18 +405,39 @@
 }
 
 .ar-body {
-  flex: 1;
+  flex: 1 1 auto;
   padding: 12px;
   overflow: auto;
 }
 
+/* Translate tab: the selected-text box and the native-translation box share
+ * all of the remaining vertical height in the panel, and the tab itself never
+ * scrolls — each box scrolls inside itself when its text does not fit.
+ * Everything else on the tab (buttons, meta, hints) keeps its natural size. */
+.ar-body[data-tab="translate"] {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ar-body[data-tab="translate"] > * {
+  flex: none;
+}
+
+.ar-body[data-tab="translate"] > .ar-result {
+  flex: 1 1 auto;
+  overflow: auto;
+}
+
 .ar-body::-webkit-scrollbar,
-.ar-sel::-webkit-scrollbar {
+.ar-sel::-webkit-scrollbar,
+.ar-result::-webkit-scrollbar {
   width: 8px;
 }
 
 .ar-body::-webkit-scrollbar-thumb,
-.ar-sel::-webkit-scrollbar-thumb {
+.ar-sel::-webkit-scrollbar-thumb,
+.ar-result::-webkit-scrollbar-thumb {
   background: var(--ar-border);
   border-radius: 8px;
 }
