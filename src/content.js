@@ -811,7 +811,12 @@
     return `
       <div class="ar-qcard">
         <span class="ar-qtype">${AR.QUIZ_TYPE_LABELS[q.type] || q.type}</span>
-        <div class="ar-qtext">${i + 1}. ${AR.escapeHtml(q.question)}</div>
+        <div class="ar-qhead">
+          <div class="ar-qtext">${i + 1}. ${AR.escapeHtml(q.question)}</div>
+          <button class="ar-speak" type="button" data-action="speak-question" data-q="${i}" title="Listen to the question" aria-label="Listen to the question">${AR.icon(
+            "volume_up"
+          )}</button>
+        </div>
         ${htmlQuestionTranslation(i, q)}
         ${inner}
         ${
@@ -889,6 +894,13 @@
   function openQuiz() {
     tab = "quiz";
     openPanel(true);
+  }
+
+  /* Questions follow the selected question language: "base" asks in the
+   * learner's own language, while "target" and "both" use the language they
+   * are learning. */
+  function quizQuestionLang() {
+    return ensureQuizConfig().quizLanguage === "base" ? settings.baseLang : settings.targetLang;
   }
 
   async function runTranslate() {
@@ -1654,6 +1666,11 @@
       case "speak-translation":
         if (state.translation.status === "done") runSpeak(state.translation.text, settings.baseLang);
         break;
+      case "speak-question": {
+        const q = state.quiz.questions[Number(el.dataset.q)];
+        if (q) runSpeak(q.question, quizQuestionLang());
+        break;
+      }
       case "quiz":
         openQuiz();
         break;

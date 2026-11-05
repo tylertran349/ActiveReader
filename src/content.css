@@ -654,6 +654,17 @@
   letter-spacing: 0.5px;
 }
 
+.ar-qhead {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.ar-qhead .ar-qtext {
+  flex: 1;
+  min-width: 0;
+}
+
 .ar-qtext {
   font-size: 14.5px;
   font-weight: 600;
