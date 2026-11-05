@@ -604,12 +604,12 @@
     } else if (t.status === "done") {
       const rtl = AR.isRtl(settings.baseLang) ? " rtl" : "";
       out = `
-        <div class="ar-trans-actions">
-          <button class="ar-speak" type="button" data-action="speak-translation" title="Listen to the translation" aria-label="Listen to the translation">${AR.icon(
-            "volume_up"
-          )}</button>
-        </div>
-        <div class="ar-result${rtl}">${AR.escapeHtml(t.text)}</div>
+        <div class="ar-result${rtl}"><div class="ar-result-row">
+            <span class="ar-result-text">${AR.escapeHtml(t.text)}</span>
+            <button class="ar-speak" type="button" data-action="speak-translation" title="Listen to the translation" aria-label="Listen to the translation">${AR.icon(
+              "volume_up"
+            )}</button>
+          </div></div>
         <div class="ar-meta">
           ${t.detected ? "Detected: " + AR.escapeHtml(AR.langLabel(t.detected)) + " · " : ""}
           ${t.engine === "gemini" ? "AI model" : "Google Translate"} · Into ${AR.escapeHtml(

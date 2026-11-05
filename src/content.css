@@ -374,9 +374,10 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
-  border-radius: 7px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 18px;
   color: var(--ar-muted);
   cursor: pointer;
   transition: background 0.12s ease, color 0.12s ease;
@@ -471,14 +472,21 @@
   min-height: 54px;
 }
 
-.ar-trans-actions {
+.ar-result-row {
   display: flex;
-  justify-content: flex-end;
-  margin-top: 12px;
+  align-items: flex-start;
+  gap: 6px;
+  direction: ltr;
 }
 
-.ar-trans-actions + .ar-result {
-  margin-top: 4px;
+.ar-result-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.ar-result.rtl .ar-result-text {
+  direction: rtl;
+  text-align: right;
 }
 
 .ar-result.rtl {
