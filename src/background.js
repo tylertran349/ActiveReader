@@ -1085,33 +1085,73 @@ async function handleQuiz(msg) {
 
 /* Generate the whole quiz with a single API request, asking for exactly the
  * number of questions needed. Extra "spare" questions would be discarded and
- * still billed as output tokens, so they are intentionally not requested. */
+ * still billed as output tokens, so they are intentionally not requested.
+ *
+ * If the response is empty, truncated or not valid JSON, the request is
+ * repeated once at a lower temperature. This only costs anything on a failure,
+ * and it turns the common one-off "model returned no text / bad JSON" error
+ * into a successful quiz instead of showing an error to the reader. */
 async function generateQuestions(text, cfg, settings, wantCount) {
   const prompt = AR.buildQuizPrompt(text, cfg, settings, wantCount);
-  const raw = await callLLM(
-    prompt,
-    settings,
-    QUIZ_SCHEMA,
-    0.85,
-    AR.quizOutputTokenLimit(wantCount, cfg.explain),
-    { cheap: true, noThinking: true }
-  );
-  const parsed = parseJsonLoose(raw);
+  const budget = AR.quizOutputTokenLimit(wantCount, cfg.explain);
+  let lastError = null;
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const raw = await callLLM(
+        prompt,
+        settings,
+        QUIZ_SCHEMA,
+        attempt === 0 ? 0.6 : 0.3,
+        budget,
+        { cheap: true, noThinking: true }
+      );
+      const collected = collectQuestions(parseJsonLoose(raw), wantCount);
+      if (collected.length) return collected;
+      lastError = new Error("The model did not return usable questions. Try again.");
+    } catch (e) {
+      lastError = e;
+      if (!isRetryableQuizError(e)) break;
+    }
+  }
+
+  throw lastError || new Error("The model did not return usable questions. Try again.");
+}
+
+/* Configuration, auth, quota and network errors will not improve by sending
+ * the same prompt again. Empty/truncated/unparseable output might. */
+function isRetryableQuizError(err) {
+  const msg = String((err && err.message) || "");
+  if (
+    /API key|No .*model|base URL|refused|not found|\(401\)|\(403\)|\(404\)|\(429\)|rate limit|quota|Could not reach/i.test(
+      msg
+    )
+  ) {
+    return false;
+  }
+  return /no text|empty response|Could not parse|usable questions/i.test(msg);
+}
+
+function collectQuestions(parsed, wantCount) {
+  const list = Array.isArray(parsed)
+    ? parsed
+    : Array.isArray(parsed && parsed.questions)
+      ? parsed.questions
+      : Array.isArray(parsed && parsed.data && parsed.data.questions)
+        ? parsed.data.questions
+        : [];
 
   const seen = new Set();
   const collected = [];
-  const fresh = (Array.isArray(parsed && parsed.questions) ? parsed.questions : [])
-    .map(normalizeQuestion)
-    .filter(Boolean);
-
-  for (const q of fresh) {
+  for (const item of list) {
+    const q = normalizeQuestion(item);
+    if (!q) continue;
     const key = questionKey(q);
-    if (seen.has(key)) continue;
+    if (!key || seen.has(key)) continue;
     seen.add(key);
     collected.push(q);
     if (collected.length >= wantCount) break;
   }
-
   return collected;
 }
 
@@ -1123,18 +1163,47 @@ function questionKey(q) {
 }
 
 function normalizeQuestion(q) {
-  if (!q || !q.question) return null;
-  const type = AR.QUIZ_TYPES.indexOf(q.type) !== -1 ? q.type : "short";
+  if (!q || typeof q !== "object") return null;
+  const rawQuestion = q.question != null ? q.question : q.text;
+  if (!rawQuestion) return null;
+
+  const options = Array.isArray(q.options)
+    ? q.options
+    : Array.isArray(q.choices)
+      ? q.choices
+      : [];
+
+  // Models occasionally omit "type". Infer it instead of discarding a
+  // perfectly usable question (which would leave the quiz short).
+  let type = AR.QUIZ_TYPES.indexOf(q.type) !== -1 ? q.type : "";
+  if (!type) {
+    if (options.length >= 2) type = "mcq";
+    else if (/_{3,}/.test(String(rawQuestion))) type = "blank";
+    else type = "short";
+  }
+
+  let answer = q.answer;
+  if (answer == null) answer = q.correctAnswer;
+  if (answer == null) answer = q.correct_answer;
+  if (Array.isArray(answer)) answer = answer.join(", ");
+
   const out = {
     type,
-    question: String(q.question).trim(),
-    answer: String(q.answer == null ? "" : q.answer).trim(),
+    question: String(rawQuestion).trim(),
+    answer: String(answer == null ? "" : answer).trim(),
     explanation: q.explanation ? String(q.explanation).trim() : ""
   };
   if (type === "mcq") {
-    out.options = Array.isArray(q.options) ? q.options.map((o) => String(o).trim()).filter(Boolean) : [];
+    out.options = options.map((o) => String(o).trim()).filter(Boolean);
     if (out.options.length < 2) return normalizeQuestion(Object.assign({}, q, { type: "short" }));
-    let idx = Number(q.answerIndex);
+    let idx = q.answerIndex;
+    if (idx == null) idx = q.answer_index;
+    if (typeof idx === "string" && /^[A-Za-z]$/.test(idx.trim())) {
+      // Some models answer "B" instead of 1.
+      idx = idx.trim().toUpperCase().charCodeAt(0) - 65;
+    } else {
+      idx = Number(idx);
+    }
     if (!Number.isInteger(idx) || idx < 0 || idx >= out.options.length) {
       const byText = out.options.findIndex((o) => o.toLowerCase() === out.answer.toLowerCase());
       idx = byText >= 0 ? byText : 0;
@@ -1147,22 +1216,180 @@ function normalizeQuestion(q) {
 }
 
 function parseJsonLoose(raw) {
-  let text = String(raw || "").trim();
-  text = text.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+  const source = String(raw == null ? "" : raw)
+    .replace(/^\uFEFF/, "")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .trim();
+
+  if (!source) {
+    throw new Error("Could not parse the quiz JSON returned by the AI model.");
+  }
+
+  const candidates = [];
+  const add = (value) => {
+    const text = String(value || "").trim();
+    if (text && candidates.indexOf(text) === -1) candidates.push(text);
+  };
+
+  add(source);
+  // Strip markdown fences and any prose around them.
+  add(source.replace(/```[\w-]*\s*/g, "").replace(/```/g, ""));
+  // Extract complete objects/arrays. A string-aware scan is used so braces or
+  // brackets inside question or answer text cannot end a candidate early.
+  for (const value of extractJsonValues(source, "{", "}")) add(value);
+  for (const value of extractJsonValues(source, "[", "]")) add(value);
+
+  for (const candidate of candidates) {
+    const parsed = tryParseJson(candidate);
+    if (parsed.ok) return shapeParsedJson(parsed.value);
+
+    // Repair the two most common small syntax errors: raw newlines/tabs inside
+    // strings, and a trailing comma before a closing brace/bracket.
+    const escaped = escapeControlCharsInStrings(candidate);
+    const repaired = stripTrailingCommas(escaped.text);
+    if (repaired !== candidate) {
+      const retried = tryParseJson(repaired);
+      if (retried.ok) return shapeParsedJson(retried.value);
+    }
+  }
+
+  throw new Error("Could not parse the quiz JSON returned by the AI model.");
+}
+
+function tryParseJson(text) {
   try {
-    return JSON.parse(text);
+    return { ok: true, value: JSON.parse(text) };
   } catch (e) {
-    const start = text.indexOf("{");
-    const end = text.lastIndexOf("}");
-    if (start >= 0 && end > start) {
-      try {
-        return JSON.parse(text.slice(start, end + 1));
-      } catch (e2) {
-        /* fall through */
+    return { ok: false, value: null };
+  }
+}
+
+function extractJsonValues(text, open, close) {
+  const values = [];
+  for (let start = text.indexOf(open); start !== -1; start = text.indexOf(open, start + 1)) {
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let i = start; i < text.length; i++) {
+      const ch = text[i];
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (ch === "\\") escaped = true;
+        else if (ch === '"') inString = false;
+        continue;
+      }
+      if (ch === '"') {
+        inString = true;
+      } else if (ch === open) {
+        depth++;
+      } else if (ch === close) {
+        depth--;
+        if (depth === 0) {
+          const value = text.slice(start, i + 1);
+          if (values.indexOf(value) === -1) values.push(value);
+          break;
+        }
       }
     }
   }
-  throw new Error("Could not parse the quiz JSON returned by the AI model.");
+  return values;
+}
+
+function escapeControlCharsInStrings(text) {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (!inString) {
+      out += ch;
+      if (ch === '"') inString = true;
+      continue;
+    }
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      out += ch;
+      escaped = true;
+    } else if (ch === '"') {
+      out += ch;
+      inString = false;
+    } else if (ch === "\n") {
+      out += "\\n";
+    } else if (ch === "\r") {
+      out += "\\r";
+    } else if (ch === "\t") {
+      out += "\\t";
+    } else {
+      out += ch;
+    }
+  }
+  return { text: out };
+}
+
+function stripTrailingCommas(text) {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      out += ch;
+      if (escaped) escaped = false;
+      else if (ch === "\\") escaped = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      out += ch;
+      continue;
+    }
+    if (ch === ",") {
+      let j = i + 1;
+      while (j < text.length && /\s/.test(text[j])) j++;
+      if (text[j] === "}" || text[j] === "]") continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+/* Some gateways double-encode the JSON or wrap the array in an envelope. */
+function shapeParsedJson(value) {
+  if (typeof value === "string") {
+    const inner = tryParseJson(value);
+    if (inner.ok) return shapeParsedJson(inner.value);
+    return value;
+  }
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    if (typeof value.questions === "string") {
+      const inner = tryParseJson(value.questions);
+      if (inner.ok) value.questions = inner.value;
+    }
+    if (
+      !Array.isArray(value.questions) &&
+      value.questions &&
+      typeof value.questions === "object" &&
+      value.questions.question
+    ) {
+      value.questions = [value.questions];
+    }
+    if (!Array.isArray(value.questions) && Array.isArray(value.items)) {
+      value.questions = value.items;
+    }
+    if (
+      !Array.isArray(value.questions) &&
+      value.data &&
+      Array.isArray(value.data.questions)
+    ) {
+      value.questions = value.data.questions;
+    }
+  }
+  return value;
 }
 
 /* --------------------------------------------------------------- grading */

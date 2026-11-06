@@ -386,8 +386,8 @@ test("quiz output budget grows with the question count and explanations", () => 
   assert.ok(short > 0);
   assert.ok(long > short);
   assert.ok(long < 4096);
-  assert.strictEqual(AR.quizOutputTokenLimit(100, true), 3584);
-  assert.strictEqual(AR.quizOutputTokenLimit(1, false), 580);
+  assert.strictEqual(AR.quizOutputTokenLimit(100, true), 4096);
+  assert.strictEqual(AR.quizOutputTokenLimit(1, false), 1200);
 });
 
 test("quiz writing uses the cheapest known thinking level", () => {
@@ -425,11 +425,17 @@ test("quiz prompt only documents the selected types and requested fields", () =>
   assert.ok(mcqOnly.includes("mcq (Multiple choice)"));
   assert.ok(mcqOnly.includes('"answerIndex"'));
   assert.ok(!mcqOnly.includes("Fill in the blank"));
-  assert.ok(!mcqOnly.includes("short: open"));
+  assert.ok(!mcqOnly.includes("short (short answer)"));
   assert.ok(!mcqOnly.includes('"answer":"..."'));
   assert.ok(!mcqOnly.includes('"explanation":"..."'));
-  // A short prompt is the main way input tokens are kept low.
-  assert.ok(mcqOnly.length < 800, "prompt was " + mcqOnly.length + " chars");
+  // The output contract must be explicit so models do not wrap the JSON in
+  // markdown or add prose around it.
+  assert.ok(mcqOnly.includes("Return one JSON object and nothing else"));
+  assert.ok(mcqOnly.includes("must start with { and end with }"));
+  assert.ok(mcqOnly.includes("exactly 3 question objects"));
+  assert.ok(mcqOnly.includes("FINAL CHECK BEFORE YOU REPLY"));
+  assert.ok(mcqOnly.includes("<<<PASSAGE"));
+  assert.ok(mcqOnly.includes("PASSAGE>>>"));
 
   const full = AR.buildQuizPrompt("Hola mundo", {
     types: ["mcq", "short", "blank"],
@@ -443,9 +449,11 @@ test("quiz prompt only documents the selected types and requested fields", () =>
       "mcq (Multiple choice), short (Short answer), blank (Fill in the blank)"
     )
   );
+  assert.ok(full.includes("Exactly one option is correct"));
   assert.ok(full.includes("Fill in the blank"));
-  assert.ok(full.includes('"explanation"'));
-  assert.ok(full.includes("translation in parentheses"));
+  assert.ok(full.includes('"explanation":"..."'));
+  assert.ok(full.includes("in parentheses"));
+  assert.ok(full.includes("exactly 5 question objects"));
 
   const shortOnly = AR.buildQuizPrompt("Hola mundo", {
     types: ["short"],
@@ -454,6 +462,7 @@ test("quiz prompt only documents the selected types and requested fields", () =>
     explain: false
   }, settings, 4);
   assert.ok(shortOnly.includes('"answer":"..."'));
+  assert.ok(shortOnly.includes('"type":"short"'));
   assert.ok(!shortOnly.includes('"options"'));
   assert.ok(!shortOnly.includes('"answerIndex"'));
 });

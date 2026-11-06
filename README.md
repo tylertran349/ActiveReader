@@ -15,7 +15,7 @@ dependencies.
 |---|---|
 | 🔊 **Text to speech** | Uses the Google Translate voice by default (natural, no API key). Falls back to the built-in browser voice if Google is unreachable. Long selections are split into chunks automatically. |
 | 🌐 **Translation** | Translates the highlighted text into your own language via Google Translate, with an optional AI engine, and reports the detected source language. Small speaker buttons play the original or the translation aloud. |
-| 🎓 **AI quizzes** | Your chosen AI model generates multiple-choice, short-answer and fill-in-the-blank questions from the selection. Answer them inline and get instant feedback: free-response answers are graded by the model (equivalent wording and small typos count) with a short explanation written in your own language. A **Translate question** button under each question shows it in your own language, and a speaker icon reads the question aloud. Your last quiz stays put when you highlight new text or switch tabs. Each quiz is generated with one request — ActiveReader does not make a second call to top up missing questions. |
+| 🎓 **AI quizzes** | Your chosen AI model generates multiple-choice, short-answer and fill-in-the-blank questions from the selection. Answer them inline and get instant feedback: free-response answers are graded by the model (equivalent wording and small typos count) with a short explanation written in your own language. A **Translate question** button under each question shows it in your own language, and a speaker icon reads the question aloud. Your last quiz stays put when you highlight new text or switch tabs. Each quiz is normally generated with one request — ActiveReader does not make a second call to top up missing questions; it only retries once if the model returns unusable output. |
 | 🖱️ **Click-a-word** | Optionally, click **any single word** while reading and a small popup appears right above it with a quick lookup of that word. Uses Google Translate by default (no key, no API cost); switch the translation engine to AI in settings for a richer, context-aware definition with part of speech and a tiny example. Off by default — turn it on via **Settings → Reading & selection → Show a definition when I click a single word**. |
 | ⭐ **Vocabulary** | Save words/phrases with their translation and source page. Search, export (JSON/CSV) and manage them in settings. |
 | ⬆️ **Update checks** | ActiveReader notices when its own version changes and, optionally, checks this GitHub project for a newer build every 12 hours. When one exists you get a toolbar badge, an optional notification, an in-popup banner — and an **Update now** button in settings that fetches the newest files from this repo and installs them in place. |
@@ -229,7 +229,10 @@ Translate MP3s and plays them, keeping playback reliable regardless of the page.
   when a selection was trimmed.
 - Quiz prompts only describe the question types and JSON fields you selected,
   ask for exactly the number of questions shown, and use the cheapest thinking
-  level a reasoning model offers, so input and output tokens stay small.
+  level a reasoning model offers. The prompt also spells out a strict JSON
+  contract (no markdown, no prose, exact fields) and the response is parsed
+  leniently; if a model still returns empty or invalid output, ActiveReader
+  retries the request once at a lower temperature instead of showing an error.
 - The audio offscreen document closes itself after playback has been idle for
   30 seconds.
 
