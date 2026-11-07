@@ -363,6 +363,16 @@
   color: var(--ar-fg);
   white-space: pre-wrap;
   word-break: break-word;
+  cursor: text;
+  transition: border-color 0.12s ease;
+}
+
+.ar-sel:hover {
+  border-color: var(--ar-muted);
+}
+
+.ar-sel:focus-within {
+  border-color: var(--ar-accent);
 }
 
 .ar-sel-row {
@@ -371,9 +381,21 @@
   gap: 6px;
 }
 
-.ar-sel-text {
+/* The selected text doubles as an editor, so readers can fix a bad OCR
+ * selection or trim a passage before translating/quizzing it. */
+.ar-sel-input {
   flex: 1;
   min-width: 0;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  resize: none;
+  overflow: hidden;
+  outline: none;
   white-space: pre-wrap;
   word-break: break-word;
 }
@@ -397,6 +419,10 @@
 .ar-speak:hover {
   background: var(--ar-field);
   color: var(--ar-accent);
+}
+
+.ar-speak[hidden] {
+  display: none;
 }
 
 .ar-speak:focus-visible {

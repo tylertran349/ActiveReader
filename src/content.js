@@ -28,6 +28,8 @@
   let bodyEl = null;
   let selLabelEl = null;
   let selEl = null;
+  let selInput = null;
+  let selSpeakEl = null;
   let badgeEl = null;
   let toastEl = null;
 
@@ -95,6 +97,7 @@
     window.addEventListener("resize", () => {
       hideToolbar();
       hideDefine();
+      resizeSelectedText();
     });
     chrome.runtime.onMessage.addListener(onRuntimeMessage);
     try {
@@ -117,7 +120,10 @@
     .ar-icon{display:inline-block;width:1.15em;height:1.15em;flex:none;vertical-align:-0.19em;fill:currentColor;pointer-events:none}
     .ar-panel{display:none;flex-direction:column;width:384px;max-height:70vh;background:var(--ar-bg);color:var(--ar-fg);border:1px solid var(--ar-border);border-radius:16px;box-shadow:var(--ar-shadow);overflow:hidden;font-size:14px}
     .ar-panel.open{display:flex}
-    .ar-sel{margin:10px 12px 0;padding:8px 10px;background:var(--ar-bg-2);border:1px solid var(--ar-border);border-radius:10px;flex:0 1 auto;min-height:40px;overflow:auto;font-size:15px;white-space:pre-wrap;word-break:break-word}
+    .ar-sel{margin:10px 12px 0;padding:8px 10px;background:var(--ar-bg-2);border:1px solid var(--ar-border);border-radius:10px;flex:0 1 auto;min-height:40px;overflow:auto;font-size:15px;white-space:pre-wrap;word-break:break-word;cursor:text}
+    .ar-sel:focus-within{border-color:var(--ar-accent)}
+    .ar-sel-row{display:flex;align-items:flex-start;gap:6px}
+    .ar-sel-input{flex:1;min-width:0;width:100%;margin:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;resize:none;overflow:hidden;outline:none;white-space:pre-wrap;word-break:break-word}
     .ar-body{flex:1 1 auto;padding:12px;overflow:auto}
     .ar-body[data-tab="translate"]{display:flex;flex-direction:column;overflow:hidden}
     .ar-body[data-tab="translate"]>*{flex:none}
@@ -247,6 +253,22 @@
     panelEl.appendChild(selLabelEl);
 
     selEl = mk("div", "ar-sel");
+    selEl.title = "Edit the selected text";
+    const selRow = mk("div", "ar-sel-row");
+    selInput = mk("textarea", "ar-sel-input");
+    selInput.rows = 1;
+    selInput.spellcheck = false;
+    selInput.setAttribute("data-action", "selected-text");
+    selInput.setAttribute("aria-label", "Selected text");
+    selSpeakEl = mk("button", "ar-speak");
+    selSpeakEl.type = "button";
+    selSpeakEl.dataset.action = "speak-original";
+    selSpeakEl.title = "Listen to the original";
+    selSpeakEl.setAttribute("aria-label", "Listen to the original");
+    setHtml(selSpeakEl, AR.icon("volume_up"));
+    selRow.appendChild(selInput);
+    selRow.appendChild(selSpeakEl);
+    selEl.appendChild(selRow);
     panelEl.appendChild(selEl);
 
     bodyEl = mk("div", "ar-body");
@@ -326,6 +348,7 @@
       panelEl.style.height = "";
       panelEl.style.maxHeight = "";
     }
+    resizeSelectedText();
   }
 
   /* -------------------------------------------------------- selection */
@@ -515,21 +538,7 @@
     }
 
     if (selLabelEl) selLabelEl.hidden = !current.text;
-
-    if (selEl) {
-      const preview = current.text + (isTruncated() ? " …" : "");
-      if (tab === "translate" && current.text) {
-        setHtml(
-          selEl,
-          `<div class="ar-sel-row"><span class="ar-sel-text">${AR.escapeHtml(preview)}</span>` +
-            `<button class="ar-speak" type="button" data-action="speak-original" title="Listen to the original" aria-label="Listen to the original">${AR.icon(
-              "volume_up"
-            )}</button></div>`
-        );
-      } else {
-        selEl.textContent = preview;
-      }
-    }
+    renderSelectedText();
     if (badgeEl) badgeEl.textContent = AR.langLabel(settings.targetLang);
 
     if (bodyEl) {
@@ -547,6 +556,26 @@
       pendingReposition = false;
       positionPanel();
     }
+  }
+
+  /* The selected-text box is persistent so editing it does not lose the caret
+   * when the rest of the panel re-renders. Its value always mirrors
+   * current.text, which every action (translate, quiz, save, listen) reads. */
+  function renderSelectedText() {
+    if (!selInput) return;
+    const text = String(current.text || "");
+    if (selInput.value !== text) selInput.value = text;
+    if (selSpeakEl) selSpeakEl.hidden = tab !== "translate" || !text;
+    resizeSelectedText();
+  }
+
+  /* Grow the textarea to fit its content. The surrounding .ar-sel box keeps
+   * the panel's height in check and scrolls when the text is very long. */
+  function resizeSelectedText() {
+    if (!selInput) return;
+    selInput.style.height = "auto";
+    const height = selInput.scrollHeight;
+    if (height) selInput.style.height = height + "px";
   }
 
   function positionPanel() {
@@ -1758,6 +1787,21 @@
   }
 
   function onShadowInput(e) {
+    const selField = e.target.closest('[data-action="selected-text"]');
+    if (selField) {
+      const value = selField.value;
+      if (value === current.text) return;
+
+      current.text = value;
+      current.saved = false;
+      /* Any response still in flight was requested for the old text. The
+       * token check in the request handlers will discard it. */
+      selectionToken++;
+      state.translation = { status: "idle", text: "", detected: "", engine: "", error: "" };
+      render();
+      return;
+    }
+
     const field = e.target.closest('[data-action="answer-input"]');
     if (field) state.quiz.entered[field.dataset.q] = field.value;
   }
@@ -1856,6 +1900,8 @@
     panelEl.style.height = Math.round(h) + "px";
     if (left !== s.left) panelEl.style.left = Math.round(left) + "px";
     if (top !== s.top) panelEl.style.top = Math.round(top) + "px";
+    /* Wrapping changes with the panel width, so remeasure the editor. */
+    resizeSelectedText();
   }
 
   function endResize() {
