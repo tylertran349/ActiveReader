@@ -432,6 +432,19 @@
     return l ? l.locale : code;
   };
 
+  /* Fill-in-the-blank questions use runs of underscores as the blank. Spoken
+   * aloud, a TTS engine reads every underscore ("underscore underscore ..."),
+   * which drowns out the sentence. Swap the blank for an ellipsis so the voice
+   * simply pauses where the missing word belongs. Single underscores are left
+   * alone, since they are usually part of a word or identifier. */
+  AR.ttsText = function (text) {
+    return String(text == null ? "" : text)
+      .replace(/(?:[ \t]*[_＿]){2,}[ \t]*/g, " … ")
+      .replace(/ {2,}/g, " ")
+      .replace(/\s+([.!?,;:])/g, "$1")
+      .trim();
+  };
+
   /* --------------------------------------------------- settings & backup */
 
   /* Your settings live in chrome.storage.sync. Browser- and system-level

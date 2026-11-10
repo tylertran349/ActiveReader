@@ -1559,7 +1559,7 @@ async function aiDefine(word, context, settings) {
 
 async function handleTts(msg) {
   const settings = await AR.getSettings();
-  const text = String(msg.text || "").trim();
+  const text = AR.ttsText(msg.text);
   if (!text) return { ok: false, error: "Nothing to read." };
 
   clearOffscreenCloseTimer();

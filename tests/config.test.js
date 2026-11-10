@@ -127,6 +127,16 @@ test("language options are sorted alphabetically by label", () => {
   assert.ok(order.some((m) => m[1] === "es" && m[2].includes("selected")));
 });
 
+test("ttsText turns underscore blanks into a pause instead of reading them", () => {
+  assert.strictEqual(AR.ttsText("Ella ____ al mercado."), "Ella … al mercado.");
+  assert.strictEqual(AR.ttsText("Ella____al mercado."), "Ella … al mercado.");
+  assert.strictEqual(AR.ttsText("Choose _ _ _ _ now."), "Choose … now.");
+  assert.strictEqual(AR.ttsText("¿Dónde está ____?"), "¿Dónde está …?");
+  // A single underscore is part of the word, not a blank.
+  assert.strictEqual(AR.ttsText("snake_case stays"), "snake_case stays");
+  assert.strictEqual(AR.ttsText(null), "");
+});
+
 test("non-numeric values fall back to defaults instead of 0", () => {
   const s = AR.normalizeSettings({ ttsRate: null, ttsPitch: true, quizCount: [], panelWidth: "" });
   assert.strictEqual(s.ttsRate, 1); // default, not the 0.5 minimum
