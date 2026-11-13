@@ -85,9 +85,9 @@
   /* Selected-text editor sizing. SEL_LINE must match the line-height of
    * .ar-sel in content.css: an integer line height keeps scrollHeight exact,
    * so the bottom line is never clipped. SEL_PAD is the box's vertical
-   * padding plus border (8 + 8 + 2). */
+   * padding plus border (9 + 9 + 2). */
   const SEL_LINE = 22;
-  const SEL_PAD = 18;
+  const SEL_PAD = 20;
   const SEL_MAX_LINES = 8;
 
   /* --------------------------------------------------------------- boot */
@@ -128,10 +128,19 @@
     .ar-icon{display:inline-block;width:1.15em;height:1.15em;flex:none;vertical-align:-0.19em;fill:currentColor;pointer-events:none}
     .ar-panel{display:none;flex-direction:column;width:384px;max-height:70vh;background:var(--ar-bg);color:var(--ar-fg);border:1px solid var(--ar-border);border-radius:16px;box-shadow:var(--ar-shadow);overflow:hidden;font-size:14px}
     .ar-panel.open{display:flex}
-    .ar-sel{margin:10px 12px 0;padding:8px 10px;background:var(--ar-bg-2);border:1px solid var(--ar-border);border-radius:10px;flex:none;min-height:40px;overflow:hidden;font-size:15px;line-height:22px;white-space:pre-wrap;word-break:break-word;cursor:text}
-    .ar-sel:focus-within{border-color:var(--ar-accent)}
-    .ar-sel-row{display:flex;align-items:flex-start;gap:6px}
+    .ar-sel-label{display:flex;align-items:center;gap:7px;margin:10px 12px 0;font-size:11px;font-weight:700;letter-spacing:.04em;text-transform:uppercase;color:var(--ar-muted)}
+    .ar-sel-label::before{content:"";flex:none;width:6px;height:6px;border-radius:50%;background:var(--ar-accent)}
+    .ar-sel-label[hidden]{display:none}
+    .ar-sel{margin:8px 12px 0;padding:9px 10px;background:var(--ar-bg-2);border:1px solid var(--ar-border);border-radius:12px;flex:none;min-height:42px;overflow:hidden;font-size:15px;line-height:22px;color:var(--ar-fg);caret-color:var(--ar-accent);white-space:pre-wrap;word-break:break-word;cursor:text;box-shadow:inset 0 1px 2px rgba(15,23,42,.05);transition:border-color .15s ease,box-shadow .15s ease}
+    .ar-sel:hover{border-color:var(--ar-muted)}
+    .ar-sel:focus-within{border-color:var(--ar-accent);box-shadow:0 0 0 3px var(--ar-field),inset 0 1px 2px rgba(15,23,42,.04)}
+    .ar-sel-row{display:flex;align-items:flex-start;gap:8px}
     .ar-sel-input{flex:1;min-width:0;width:100%;margin:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;resize:none;overflow-y:auto;overflow-x:hidden;outline:none;white-space:pre-wrap;word-break:break-word}
+    .ar-speak{all:unset;box-sizing:border-box;flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;font-size:18px;color:var(--ar-muted);cursor:pointer;transition:background .12s ease,color .12s ease,border-color .12s ease}
+    .ar-speak:hover{background:var(--ar-field);color:var(--ar-accent)}
+    .ar-speak[hidden]{display:none}
+    .ar-sel .ar-speak{width:28px;height:28px;margin-top:-1px;background:var(--ar-bg);border:1px solid var(--ar-border);border-radius:9px;font-size:17px;box-shadow:0 1px 2px rgba(15,23,42,.06)}
+    .ar-sel .ar-speak:hover{background:var(--ar-field);border-color:var(--ar-accent);color:var(--ar-accent)}
     .ar-body{flex:1 1 auto;padding:12px;overflow:auto}
     .ar-body[data-tab="translate"]{display:flex;flex-direction:column;overflow:hidden}
     .ar-body[data-tab="translate"]>*{flex:none}
@@ -271,11 +280,11 @@
     selSpeakEl = mk("button", "ar-speak");
     selSpeakEl.type = "button";
     selSpeakEl.dataset.action = "speak-original";
-    selSpeakEl.title = "Listen to the original";
-    selSpeakEl.setAttribute("aria-label", "Listen to the original");
+    selSpeakEl.title = "Listen to the selected text";
+    selSpeakEl.setAttribute("aria-label", "Listen to the selected text");
     setHtml(selSpeakEl, AR.icon("volume_up"));
-    selRow.appendChild(selInput);
     selRow.appendChild(selSpeakEl);
+    selRow.appendChild(selInput);
     selEl.appendChild(selRow);
     panelEl.appendChild(selEl);
 
