@@ -335,15 +335,6 @@
   color: var(--ar-muted);
 }
 
-.ar-sel-label::before {
-  content: "";
-  flex: none;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: var(--ar-accent);
-}
-
 .ar-sel-label[hidden] {
   display: none;
 }
@@ -395,7 +386,7 @@
 
 .ar-sel-row {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 8px;
 }
 
@@ -457,7 +448,6 @@
 .ar-sel .ar-speak {
   width: 28px;
   height: 28px;
-  margin-top: -1px;
   background: var(--ar-bg);
   border: 1px solid var(--ar-border);
   border-radius: 9px;
