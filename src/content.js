@@ -573,7 +573,7 @@
     if (!selInput) return;
     const text = String(current.text || "");
     if (selInput.value !== text) selInput.value = text;
-    if (selSpeakEl) selSpeakEl.hidden = tab !== "translate" || !text;
+    if (selSpeakEl) selSpeakEl.hidden = !text;
     resizeSelectedText();
   }
 
@@ -997,6 +997,13 @@
       state.translation = { status: "error", error: res.error || "Translation failed.", text: "", detected: "", engine: "" };
     }
     render();
+  }
+
+  /* Text currently shown in the persistent selected-text box. The box can hold
+   * an edited or older value than the page selection, so TTS from its speaker
+   * button must read the box itself rather than current.text. */
+  function selectedBoxText() {
+    return selInput ? String(selInput.value || "") : String(current.text || "");
   }
 
   async function runSpeak(text, lang) {
@@ -1707,7 +1714,7 @@
         openSpeak();
         break;
       case "speak-original":
-        runSpeak(current.text, settings.targetLang);
+        runSpeak(selectedBoxText(), settings.targetLang);
         break;
       case "speak-translation":
         if (state.translation.status === "done") runSpeak(state.translation.text, settings.baseLang);
