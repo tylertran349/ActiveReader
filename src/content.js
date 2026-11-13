@@ -82,6 +82,14 @@
   const PANEL_MIN_W = 280;
   const PANEL_MIN_H = 220;
 
+  /* Selected-text editor sizing. SEL_LINE must match the line-height of
+   * .ar-sel in content.css: an integer line height keeps scrollHeight exact,
+   * so the bottom line is never clipped. SEL_PAD is the box's vertical
+   * padding plus border (8 + 8 + 2). */
+  const SEL_LINE = 22;
+  const SEL_PAD = 18;
+  const SEL_MAX_LINES = 8;
+
   /* --------------------------------------------------------------- boot */
 
   init();
@@ -120,10 +128,10 @@
     .ar-icon{display:inline-block;width:1.15em;height:1.15em;flex:none;vertical-align:-0.19em;fill:currentColor;pointer-events:none}
     .ar-panel{display:none;flex-direction:column;width:384px;max-height:70vh;background:var(--ar-bg);color:var(--ar-fg);border:1px solid var(--ar-border);border-radius:16px;box-shadow:var(--ar-shadow);overflow:hidden;font-size:14px}
     .ar-panel.open{display:flex}
-    .ar-sel{margin:10px 12px 0;padding:8px 10px;background:var(--ar-bg-2);border:1px solid var(--ar-border);border-radius:10px;flex:0 1 auto;min-height:40px;overflow:auto;font-size:15px;white-space:pre-wrap;word-break:break-word;cursor:text}
+    .ar-sel{margin:10px 12px 0;padding:8px 10px;background:var(--ar-bg-2);border:1px solid var(--ar-border);border-radius:10px;flex:none;min-height:40px;overflow:hidden;font-size:15px;line-height:22px;white-space:pre-wrap;word-break:break-word;cursor:text}
     .ar-sel:focus-within{border-color:var(--ar-accent)}
     .ar-sel-row{display:flex;align-items:flex-start;gap:6px}
-    .ar-sel-input{flex:1;min-width:0;width:100%;margin:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;resize:none;overflow:hidden;outline:none;white-space:pre-wrap;word-break:break-word}
+    .ar-sel-input{flex:1;min-width:0;width:100%;margin:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;resize:none;overflow-y:auto;overflow-x:hidden;outline:none;white-space:pre-wrap;word-break:break-word}
     .ar-body{flex:1 1 auto;padding:12px;overflow:auto}
     .ar-body[data-tab="translate"]{display:flex;flex-direction:column;overflow:hidden}
     .ar-body[data-tab="translate"]>*{flex:none}
@@ -569,12 +577,21 @@
     resizeSelectedText();
   }
 
-  /* Grow the textarea to fit its content. The surrounding .ar-sel box keeps
-   * the panel's height in check and scrolls when the text is very long. */
+  /* Grow the editor to fit its content, up to a cap of ~40% of the panel
+   * (never more than SEL_MAX_LINES lines). Past the cap the editor scrolls
+   * itself — the surrounding box never scrolls, so there is always exactly
+   * one scrollbar and the box never gets squeezed by the tab below.
+   * Called whenever the panel is resized or the text changes, since both
+   * affect wrapping and the cap. */
   function resizeSelectedText() {
     if (!selInput) return;
     selInput.style.height = "auto";
-    const height = selInput.scrollHeight;
+    let cap = SEL_MAX_LINES * SEL_LINE;
+    const panelH = panelEl ? panelEl.clientHeight : 0;
+    if (panelH > 0) {
+      cap = Math.max(3 * SEL_LINE, Math.min(cap, Math.round(panelH * 0.4) - SEL_PAD));
+    }
+    const height = Math.min(selInput.scrollHeight, cap);
     if (height) selInput.style.height = height + "px";
   }
 

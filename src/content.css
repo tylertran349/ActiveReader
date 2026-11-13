@@ -354,15 +354,18 @@
   background: var(--ar-bg-2);
   border: 1px solid var(--ar-border);
   border-radius: 10px;
-  /* Never taller than it needs to be, but shrink (never grow) under height
-   * pressure so the tab itself never has to scroll. */
-  flex: 0 1 auto;
-  min-height: 40px; /* keep at least one line visible */
-  overflow: auto;
+  /* Pinned header above the tab body: natural height only, never squeezed by
+   * flex pressure and never a scroller itself — so the box keeps a stable
+   * size while the tab below scrolls, with exactly one scrollbar in total.
+   * The editor inside is the scroller, capped by resizeSelectedText(). */
+  flex: none;
+  min-height: 40px; /* one line of editor + padding */
+  overflow: hidden;
   font-size: 15px;
+  /* Integer line height: a fractional one makes scrollHeight round to a
+   * smaller value, which clips the bottom line. Keep in sync with SEL_LINE. */
+  line-height: 22px;
   color: var(--ar-fg);
-  white-space: pre-wrap;
-  word-break: break-word;
   cursor: text;
   transition: border-color 0.12s ease;
 }
@@ -394,7 +397,10 @@
   color: inherit;
   font: inherit;
   resize: none;
-  overflow: hidden;
+  /* The single scrollbar of the selected-text box: when resizeSelectedText()
+   * caps the editor's height, the editor scrolls itself; the box never does. */
+  overflow-y: auto;
+  overflow-x: hidden;
   outline: none;
   white-space: pre-wrap;
   word-break: break-word;
@@ -436,10 +442,11 @@
   overflow: auto;
 }
 
-/* Translate tab: the selected-text box and the native-translation box share
- * all of the remaining vertical height in the panel, and the tab itself never
- * scrolls — each box scrolls inside itself when its text does not fit.
- * Everything else on the tab (buttons, meta, hints) keeps its natural size. */
+/* Translate tab: the tab itself never scrolls. The native-translation box
+ * takes all of the remaining vertical height and scrolls inside itself when
+ * its text does not fit; the selected-text box above it keeps its natural,
+ * capped height (see .ar-sel). Everything else on the tab (buttons, meta,
+ * hints) keeps its natural size. */
 .ar-body[data-tab="translate"] {
   display: flex;
   flex-direction: column;
@@ -456,13 +463,13 @@
 }
 
 .ar-body::-webkit-scrollbar,
-.ar-sel::-webkit-scrollbar,
+.ar-sel-input::-webkit-scrollbar,
 .ar-result::-webkit-scrollbar {
   width: 8px;
 }
 
 .ar-body::-webkit-scrollbar-thumb,
-.ar-sel::-webkit-scrollbar-thumb,
+.ar-sel-input::-webkit-scrollbar-thumb,
 .ar-result::-webkit-scrollbar-thumb {
   background: var(--ar-border);
   border-radius: 8px;
