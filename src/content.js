@@ -133,8 +133,8 @@
     .ar-sel{margin:8px 12px 0;padding:9px 10px;background:var(--ar-bg-2);border:1px solid var(--ar-border);border-radius:12px;flex:none;min-height:42px;overflow:hidden;font-size:15px;line-height:22px;color:var(--ar-fg);caret-color:var(--ar-accent);white-space:pre-wrap;word-break:break-word;cursor:text;box-shadow:inset 0 1px 2px rgba(15,23,42,.05);transition:border-color .15s ease,box-shadow .15s ease}
     .ar-sel:hover{border-color:var(--ar-muted)}
     .ar-sel:focus-within{border-color:var(--ar-accent);box-shadow:0 0 0 3px var(--ar-field),inset 0 1px 2px rgba(15,23,42,.04)}
-    .ar-sel-row{display:flex;align-items:center;gap:8px}
-    .ar-sel-input{flex:1;min-width:0;width:100%;margin:0;padding:0;border:0;background:transparent;color:inherit;font:inherit;resize:none;overflow-y:auto;overflow-x:hidden;outline:none;white-space:pre-wrap;word-break:break-word}
+    .ar-sel-row{display:flex;align-items:flex-start;gap:8px}
+    .ar-sel-input{flex:1;min-width:0;width:100%;margin:0;align-self:center;padding:0;border:0;background:transparent;color:inherit;font:inherit;resize:none;overflow-y:auto;overflow-x:hidden;outline:none;white-space:pre-wrap;word-break:break-word}
     .ar-speak{all:unset;box-sizing:border-box;flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:8px;font-size:18px;color:var(--ar-muted);cursor:pointer;transition:background .12s ease,color .12s ease,border-color .12s ease}
     .ar-speak:hover{background:var(--ar-field);color:var(--ar-accent)}
     .ar-speak[hidden]{display:none}
