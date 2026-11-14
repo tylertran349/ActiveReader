@@ -801,11 +801,13 @@
    * their hidden thinking tokens against this limit, so the budget includes a
    * generous fixed overhead. Too small a limit is the usual cause of a
    * "returned no text" error (the model spent the whole budget thinking and
-   * never wrote the answer). 4096 is accepted by all supported chat APIs. */
+   * never wrote the answer), and real-world gateways do not always honor
+   * reasoning_effort, so the overhead assumes an effort closer to the default.
+   * 4096 is accepted by all supported chat APIs. */
   AR.quizOutputTokenLimit = function (count, explain) {
     const n = Math.max(1, Math.min(20, Number(count) || 5));
     const perQuestion = explain ? 320 : 250;
-    return Math.max(1200, Math.min(4096, Math.round(900 + n * perQuestion)));
+    return Math.max(1800, Math.min(4096, Math.round(1600 + n * perQuestion)));
   };
 
   /* Quiz writing needs little deliberate reasoning. Use the cheapest level a

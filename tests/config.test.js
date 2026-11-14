@@ -397,7 +397,9 @@ test("quiz output budget grows with the question count and explanations", () => 
   assert.ok(long > short);
   assert.ok(long < 4096);
   assert.strictEqual(AR.quizOutputTokenLimit(100, true), 4096);
-  assert.strictEqual(AR.quizOutputTokenLimit(1, false), 1200);
+  // The fixed overhead covers hidden reasoning tokens; too small a budget
+  // makes reasoning models return "no text" (truncated mid-thinking).
+  assert.strictEqual(AR.quizOutputTokenLimit(1, false), 1850);
 });
 
 test("quiz writing uses the cheapest known thinking level", () => {

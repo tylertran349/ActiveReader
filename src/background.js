@@ -682,7 +682,15 @@ async function callCustomModel(prompt, settings, schema, temperature, maxOutputT
 
   if (!text.trim()) {
     const reason = (choice && choice.finish_reason) || (data && data.stop_reason) || "";
-    throw new Error(reason ? "The AI model returned no text (" + reason + ")." : "The AI model returned an empty response.");
+    const hint =
+      reason === "length"
+        ? " — the output token limit was reached before any content was written, likely because the model spent it all on hidden reasoning."
+        : "";
+    throw new Error(
+      reason
+        ? "The AI model returned no text (" + reason + ")" + hint + "."
+        : "The AI model returned an empty response."
+    );
   }
 
   return text;
@@ -1103,7 +1111,10 @@ async function generateQuestions(text, cfg, settings, wantCount) {
         settings,
         QUIZ_SCHEMA,
         attempt === 0 ? 0.6 : 0.3,
-        budget,
+        // The retry gets the full output budget: a "no text" failure usually
+        // means reasoning tokens consumed the limit before any JSON was
+        // written, so repeating with the same cap tends to fail again.
+        attempt === 0 ? budget : 4096,
         { cheap: true, noThinking: true }
       );
       const collected = collectQuestions(parseJsonLoose(raw), wantCount);
@@ -1122,8 +1133,11 @@ async function generateQuestions(text, cfg, settings, wantCount) {
  * the same prompt again. Empty/truncated/unparseable output might. */
 function isRetryableQuizError(err) {
   const msg = String((err && err.message) || "");
+  /* "No ..." anchors to the "No API key / No custom model set" style config
+   * errors; without the anchor a message like "returned no text ... the model
+   * spent it all" would falsely match and skip the retry. */
   if (
-    /API key|No .*model|base URL|refused|not found|\(401\)|\(403\)|\(404\)|\(429\)|rate limit|quota|Could not reach/i.test(
+    /^No .*model|API key|base URL|refused|not found|\(401\)|\(403\)|\(404\)|\(429\)|rate limit|quota|Could not reach/i.test(
       msg
     )
   ) {
