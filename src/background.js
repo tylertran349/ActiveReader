@@ -682,10 +682,13 @@ async function callCustomModel(prompt, settings, schema, temperature, maxOutputT
 
   if (!text.trim()) {
     const reason = (choice && choice.finish_reason) || (data && data.stop_reason) || "";
-    const hint =
-      reason === "length"
-        ? " — the output token limit was reached before any content was written, likely because the model spent it all on hidden reasoning."
-        : "";
+    // "length" is the OpenAI-style cutoff reason; Anthropic-shaped gateways use
+    // "max_tokens". Both mean the output budget was exhausted before any text
+    // was written, which is the classic reasoning-model failure mode.
+    const cutoff = /^(length|max_tokens)$/i.test(String(reason));
+    const hint = cutoff
+      ? " — the output token limit was reached before any content was written, likely because the model spent it all on hidden reasoning."
+      : "";
     throw new Error(
       reason
         ? "The AI model returned no text (" + reason + ")" + hint + "."
