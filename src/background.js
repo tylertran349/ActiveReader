@@ -1169,6 +1169,7 @@ function collectQuestions(parsed, wantCount) {
     collected.push(q);
     if (collected.length >= wantCount) break;
   }
+  spreadMcqAnswers(collected);
   return collected;
 }
 
@@ -1179,22 +1180,62 @@ function questionKey(q) {
     .trim();
 }
 
-/* Fisher-Yates shuffle of mcq options that also tracks which entry was the
- * correct one, so the answer index can be remapped afterwards. Models are
- * heavily biased toward placing the correct option first, which would make
- * "A" the right answer almost every time if options were shown as generated. */
-function shuffleMcqOptions(options, correctIdx) {
-  const pairs = options.map((option, i) => ({ option, correct: i === correctIdx }));
-  for (let i = pairs.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    const tmp = pairs[i];
-    pairs[i] = pairs[j];
-    pairs[j] = tmp;
+/* Spread the correct-answer positions of every mcq in one quiz, and shuffle
+ * the wrong options around each assigned position. Models are heavily
+ * biased toward placing the correct option first, which would make "A" the
+ * right answer almost every time if options were shown as generated.
+ * Within a single quiz the positions are also kept distinct as long as
+ * there are enough option slots, so consecutive mcq questions get different
+ * answer letters. When there are more mcq questions than slots, the
+ * least-used position wins so repeats spread out instead of piling up. */
+function spreadMcqAnswers(questions) {
+  const mcqs = questions.filter(
+    (q) => q && q.type === "mcq" && Array.isArray(q.options) && q.options.length >= 2
+  );
+  const used = new Map();
+  for (const q of mcqs) {
+    const n = q.options.length;
+    const free = [];
+    for (let i = 0; i < n; i++) {
+      if (!used.get(i)) free.push(i);
+    }
+    let pos;
+    if (free.length) {
+      pos = free[Math.floor(Math.random() * free.length)];
+    } else {
+      /* Every position is taken: reuse the least-used one. */
+      const least = [];
+      let minCount = Infinity;
+      for (let i = 0; i < n; i++) {
+        const count = used.get(i) || 0;
+        if (count < minCount) {
+          minCount = count;
+          least.length = 0;
+          least.push(i);
+        } else if (count === minCount) {
+          least.push(i);
+        }
+      }
+      pos = least[Math.floor(Math.random() * least.length)];
+    }
+    used.set(pos, (used.get(pos) || 0) + 1);
+
+    /* Move the correct option to the chosen slot and shuffle the wrong
+     * options into the remaining slots. Grading compares answer text, so
+     * only the index needs remapping. */
+    const correct = q.options[q.answerIndex];
+    const wrong = q.options.filter((_, i) => i !== q.answerIndex);
+    for (let i = wrong.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = wrong[i];
+      wrong[i] = wrong[j];
+      wrong[j] = tmp;
+    }
+    wrong.splice(pos, 0, correct);
+    q.options = wrong;
+    q.answerIndex = pos;
+    q.answer = correct;
   }
-  return {
-    options: pairs.map((p) => p.option),
-    correctIndex: pairs.findIndex((p) => p.correct)
-  };
 }
 
 function normalizeQuestion(q) {
@@ -1243,13 +1284,11 @@ function normalizeQuestion(q) {
       const byText = out.options.findIndex((o) => o.toLowerCase() === out.answer.toLowerCase());
       idx = byText >= 0 ? byText : 0;
     }
-    // Shuffle so the correct option is not always first ("A"), then remap the
-    // answer index to its new position. Grading compares answer text, so only
-    // the index needs updating.
-    const shuffledMcq = shuffleMcqOptions(out.options, idx);
-    out.options = shuffledMcq.options;
-    out.answerIndex = shuffledMcq.correctIndex;
-    out.answer = out.options[out.answerIndex];
+    /* Per-question shuffling is skipped here: spreadMcqAnswers() assigns the
+     * correct-answer position for the whole quiz at once, so that multiple
+     * mcq questions in one quiz get distinct, random answer letters. */
+    out.answerIndex = idx;
+    out.answer = out.options[idx];
   }
   if (!out.answer) return null;
   return out;
