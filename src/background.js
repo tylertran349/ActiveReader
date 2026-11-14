@@ -1162,6 +1162,24 @@ function questionKey(q) {
     .trim();
 }
 
+/* Fisher-Yates shuffle of mcq options that also tracks which entry was the
+ * correct one, so the answer index can be remapped afterwards. Models are
+ * heavily biased toward placing the correct option first, which would make
+ * "A" the right answer almost every time if options were shown as generated. */
+function shuffleMcqOptions(options, correctIdx) {
+  const pairs = options.map((option, i) => ({ option, correct: i === correctIdx }));
+  for (let i = pairs.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = pairs[i];
+    pairs[i] = pairs[j];
+    pairs[j] = tmp;
+  }
+  return {
+    options: pairs.map((p) => p.option),
+    correctIndex: pairs.findIndex((p) => p.correct)
+  };
+}
+
 function normalizeQuestion(q) {
   if (!q || typeof q !== "object") return null;
   const rawQuestion = q.question != null ? q.question : q.text;
@@ -1208,8 +1226,13 @@ function normalizeQuestion(q) {
       const byText = out.options.findIndex((o) => o.toLowerCase() === out.answer.toLowerCase());
       idx = byText >= 0 ? byText : 0;
     }
-    out.answerIndex = idx;
-    out.answer = out.options[idx];
+    // Shuffle so the correct option is not always first ("A"), then remap the
+    // answer index to its new position. Grading compares answer text, so only
+    // the index needs updating.
+    const shuffledMcq = shuffleMcqOptions(out.options, idx);
+    out.options = shuffledMcq.options;
+    out.answerIndex = shuffledMcq.correctIndex;
+    out.answer = out.options[out.answerIndex];
   }
   if (!out.answer) return null;
   return out;

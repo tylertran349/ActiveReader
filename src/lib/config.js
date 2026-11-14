@@ -936,7 +936,7 @@
     const exampleItems = [];
     if (wantsMcq) {
       exampleItems.push(
-        `{"type":"mcq","question":"...","options":["...","...","...","..."],"answerIndex":0` +
+        `{"type":"mcq","question":"...","options":["...","...","...","..."],"answerIndex":2` +
           (cfg.explain ? `,"explanation":"..."` : "") +
           `}`
       );
